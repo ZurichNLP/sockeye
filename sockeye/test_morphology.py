@@ -121,6 +121,7 @@ def main():
         
         (sample_size, max_length_subwords, hidden_dimension) = encoded_tokens.shape
         (sample_size_labels, ) = labels.shape
+        print("testing sample size: ", sample_size)
          
         if sample_size != sample_size_labels:
             print("shapes do not match, encoded sequences have {} samples, but labels have {}".format(sample_size, sample_size_labels))

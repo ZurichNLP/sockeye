@@ -219,33 +219,34 @@ def encode(inputs: List[Input],
             buckets_source = data_io.define_buckets(max_input_length, step=bucket_source_width)
         else:
             buckets_source = [max_input_length]
-
+            
+        
         # split into chunks
         input_chunks = []  # type: List[IndexedTranslatorInput]
         for input_idx, input in enumerate(inputs):
-                max_input_length_without_eos = max_input_length -1
-                # oversized input
-                if len(input.tokens) > max_input_length_without_eos:
-                    logger.debug(
-                            "Input %s has length (%d) that exceeds max input length (%d). "
-                            "Splitting into chunks of size %d.",
-                            trans_input.sentence_id, len(trans_input.tokens),
-                            buckets_source[-1], max_input_length_without_eos)
-                    chunks = [input_chunk.with_eos()
-                                  for input_chunk in input.chunks(max_input_length_without_eos)]
-                    input_chunks.extend([IndexedInput(trans_input_idx, chunk_idx, chunk_input)
-                                             for chunk_idx, chunk_input in enumerate(chunks)])
-                    # regular input
-                else:
-                    input_chunks.append(IndexedInput(input_idx,
+                #print(input_idx)
+                #max_input_length_without_eos = max_input_length -1 # don't need this since we use max_input_length=maximum length of sequence in conll
+                # oversized input 
+                #if len(input.tokens) > max_input_length_without_eos:
+                    #logger.debug(
+                            #"Input %s has length (%d) that exceeds max input length (%d). "
+                            #"Splitting into chunks of size %d.",
+                            #trans_input.sentence_id, len(trans_input.tokens),
+                            #buckets_source[-1], max_input_length_without_eos)
+                    #chunks = [input_chunk.with_eos()
+                                  #for input_chunk in input.chunks(max_input_length_without_eos)]
+                    #input_chunks.extend([IndexedInput(trans_input_idx, chunk_idx, chunk_input)
+                                             #for chunk_idx, chunk_input in enumerate(chunks)])
+                    ## regular input
+                #else:
+                input_chunks.append(IndexedInput(input_idx,
                                                          chunk_idx=0,
                                                          input=input.with_eos()))
 
 
 
         # Sort longest to shortest (to rather fill batches of shorter than longer sequences)
-        input_chunks = sorted(input_chunks, key=lambda chunk: len(chunk.input.tokens), reverse=True)
-
+       # input_chunks = sorted(input_chunks, key=lambda chunk: len(chunk.input.tokens), reverse=True)
         # translate in batch-sized blocks over input chunks
         batch_size = max_batch_size if fill_up_batches else min(len(input_chunks), self.max_batch_size)
         encoded_sequences = [] # list(number of batches, batch_size, seq_len, num_hidden)
@@ -253,7 +254,6 @@ def encode(inputs: List[Input],
         num_batches = 0
         for batch_id, batch in enumerate(utils.grouper(input_chunks, batch_size)):
             logger.debug("Encoding batch %d", batch_id)
-
             rest = batch_size - len(batch)
             if fill_up_batches and rest > 0:
                 logger.debug("Padding batch of size %d to full batch size (%d)", len(batch), batch_size)
@@ -272,7 +272,7 @@ def encode(inputs: List[Input],
             #print(encoder_states[0].shape, len(encoder_states))
             encoded_sequences.extend(encoder_states) # list of batches [batch, batch]
      
-        return encoded_sequences
+        return encoded_sequences # len(encoded_sequences)= number of batches
     
 
 def normalize_punctuation(string: str):
@@ -377,7 +377,7 @@ def get_encoded_tokens(encoded_sequences: List[List[np.array]],
         #print("i",i)
         #print("len batch", len(batch))
         for j, encoded_sequence in enumerate(batch): # encoded_sequence: np.array of shape (max_seq_len, hidden_dimension)
-            #print("j", j)
+            print("j", j)
             bpe_sentence = bpe_sequences[(i*batch_size)+j].split(' ')
             tag_sequence = tag_sequences[(i*batch_size)+j]
             token_sequence = token_sequences[(i*batch_size)+j]
@@ -429,6 +429,7 @@ def get_encoded_tokens(encoded_sequences: List[List[np.array]],
                 
                 bpe_iterator +=1
                 training_tokens.append(training_token)
+                
                 #print("len hidden ", len(hidden_states))
                 #print("classifier input: ", training_token)
         if fixed_max_length_subwords == None:
@@ -436,8 +437,8 @@ def get_encoded_tokens(encoded_sequences: List[List[np.array]],
         elif counted_max_length_subwords > fixed_max_length_subwords:
             logger.warn("Number of subword units exceeds given max length in data. Given max length: {}, counted max length {}".format(fixed_max_length_subwords, counted_max_length_subwords))
             fixed_max_length_subwords = counted_max_length_subwords
-
-        return training_tokens, fixed_max_length_subwords
+    print(len(training_tokens))
+    return training_tokens, fixed_max_length_subwords
     
 def make_classifier_input(training_tokens: List[ClassifierInput], 
                           feature: str,
@@ -485,6 +486,7 @@ def train_logistic_regression(labels: np.array, encoded_sequences: np.array):
 
     #print("dtypes: ", encoded_sequences.dtype, labels.dtype)
     #print("shapes: ", encoded_sequences.shape, labels.shape)
+    print("training on sample size: ", sample_size)
     model.fit(encoded_sequences, labels)
     return model
     
@@ -550,7 +552,7 @@ def main():
     tags = [[token["feats"] for token in sentence] for sentence in conll]
 
     bpe_sequences, tag_sequences = preprocess(token_sequences, tags, args.truecase_model, args.bpe_model, args.bpe_vocab)
-    
+
     max_source = max([source_sentence.split() for source_sentence in bpe_sequences], key=len)
     max_seq_len_source = len(max_source) +1 # <eos>
     s_model = source_model.SourceModel(config=model_config,
@@ -560,6 +562,7 @@ def main():
     s_model.initialize(max_batch_size=args.batch_size,
                        max_input_length=max_seq_len_source)
     inputs = make_inputs(bpe_sequences)
+ 
     encoded_sequences = encode(inputs=inputs,
            max_input_length=max_seq_len_source,
            max_batch_size=args.batch_size,
@@ -568,7 +571,7 @@ def main():
            s_model=s_model,
            bucket_source_width=args.bucket_width,
            fill_up_batches=True)
-    
+
     training_tokens, max_length_subwords = get_encoded_tokens(encoded_sequences=encoded_sequences,
                                          batch_size=args.batch_size,
                                          tag_sequences=tag_sequences,
