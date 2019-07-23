@@ -279,7 +279,7 @@ def add_average_args(params):
 
 def add_extract_args(params):
     extract_params = params.add_argument_group("Extracting")
-    extract_params.add_argument("input",
+    extract_params.add_argument("--input",
                                 metavar="INPUT",
                                 type=str,
                                 help="Either a model directory (using params.best) or a specific params.x file.")
