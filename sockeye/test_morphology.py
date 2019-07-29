@@ -38,6 +38,8 @@ def main():
                     help='File containing conll test data.')
     parser.add_argument('--regression-model',  type=str, 
                     help='File containing the pickled regression model.')
+    parser.add_argument('--gluon-model',  type=str, 
+                    help='File containing the params of a trained gluon model.')
     parser.add_argument('--batch-size',
                         type=arguments.int_greater_or_equal(1),
                         default=20,
@@ -64,7 +66,10 @@ def main():
     logger.info("Device: %s", context)
     
     #load regression model + config
-    regression_config = args.regression_model + ".conf.json"
+    if args.regression_model is not None:
+        regression_config = args.regression_model + ".conf.json"
+    else:
+        regression_config = args.gluon_model + ".conf.json"
     with open(regression_config) as json_file:
         regression_config = json.load(json_file)
         sockeye_model = regression_config["sockeye-model"] 
@@ -73,6 +78,7 @@ def main():
         bpe_vocab = regression_config["bpe-vocab"] 
         feature = regression_config["feature"] 
         max_length_subwords = regression_config["max_length_subwords"]
+        language = regression_config["language"]
         
         # load vocab, config + sockeye model
         source_vocabs = vocab.load_source_vocabs(sockeye_model)
@@ -108,6 +114,7 @@ def main():
             fill_up_batches=True)
         
         training_tokens, max_length_subwords = train_morphology.get_encoded_tokens(encoded_sequences=encoded_sequences,
+                                            language=language,
                                             batch_size=args.batch_size,
                                             tag_sequences=tag_sequences,
                                             bpe_sequences=bpe_sequences,
@@ -115,23 +122,32 @@ def main():
                                             fixed_max_length_subwords=max_length_subwords)
         
         labels, encoded_tokens = train_morphology.make_classifier_input(training_tokens, feature ,max_length_subwords) # labels: (sample_size,), encoded_tokens: (sample_size, max_length_subwords, hidden_dimension)
-    
-        # reshape to 2-dimensional array
-        trained_model = joblib.load(args.regression_model)
         
         (sample_size, max_length_subwords, hidden_dimension) = encoded_tokens.shape
         (sample_size_labels, ) = labels.shape
         print("testing sample size: ", sample_size)
-         
+            
         if sample_size != sample_size_labels:
             print("shapes do not match, encoded sequences have {} samples, but labels have {}".format(sample_size, sample_size_labels))
             exit(0)
-        
-        encoded_tokens = encoded_tokens.reshape(sample_size, max_length_subwords * hidden_dimension)
-        
-        print(encoded_tokens.shape, labels.shape)
-        result = trained_model.score(encoded_tokens, labels)
-        print(result)
+    
+        if args.regression_model is not None:
+            trained_model = joblib.load(args.regression_model)
+            # reshape to 2-dimensional array
+            encoded_tokens = encoded_tokens.reshape(sample_size, max_length_subwords * hidden_dimension)
+            #print(encoded_tokens.shape, labels.shape)
+            result = trained_model.score(encoded_tokens, labels)
+            print(result)
+        elif args.gluon_model is not None:
+            num_outputs = len(train_morphology.label_classes[feature])
+            net = mx.gluon.nn.Sequential()
+            with net.name_scope():
+                net.add(mx.gluon.nn.Dense(num_outputs))
+            net.load_parameters(args.gluon_model, ctx=context)
+            
+            test_set = mx.gluon.data.ArrayDataset(encoded_tokens, labels)
+            test_dataloader = mx.gluon.data.DataLoader(test_set, batch_size=args.batch_size, shuffle=False)
+            print(train_morphology.evaluate_accuracy(test_dataloader, net, context))
 
 if __name__ == '__main__':
     main()

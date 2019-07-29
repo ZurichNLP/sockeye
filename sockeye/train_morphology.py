@@ -10,6 +10,7 @@ import sacremoses
 import codecs
 from subword_nmt.apply_bpe import BPE, read_vocabulary
 from sklearn.linear_model import LogisticRegression
+from sklearn.model_selection import train_test_split
 import joblib
 import json
 from collections import OrderedDict
@@ -28,6 +29,7 @@ from . import model
 from . import constants as C
 from . import source_model
 from . import utils
+from .log import setup_main_logger
 
 logger = logging.getLogger(__name__)
 
@@ -102,24 +104,35 @@ morph_features = {
     "ADV": "pos",
     "CONJ": "pos",
     "DET": "pos",
+    "INTJ" : "pos",
     "N": "pos",
     "NUM": "pos",
     "PART": "pos",
     "PRO": "pos",
     "PROPN": "pos",
     "V": "pos",
+    "V.CVB": "pos",
     "V.PTCP": "pos",
+    "V.MSDR" : "pos",
     "X": "pos",
     "FEM" : "gender",
     "MASC" : "gender",
     "NEUT" : "gender",
+    "FEM_NEUT" :"gender",
+    "MASC_NEUT" : "gender",
+    "FEM_MASC" : "gender",
     "SG" : "number",
     "PL" : "number",
+    "DU" : "number",
+    "SG_PL" : "number",
     "DEF" : "definiteness",
     "INDF" : "definiteness",
     "SBJV" : "mood",
     "IND" : "mood",
     "IMP" : "mood",
+    "COND" : "mood",
+    "OPT" : "mood",
+    "POT" : "mood",
     "FIN" : "finiteness",
     "NFIN" : "finiteness",
     "PST" : "tense",
@@ -129,10 +142,43 @@ morph_features = {
     "DAT" : "case",
     "ACC" : "case",
     "GEN" : "case",
+    "AT+ABL" : "case",
+    "AT+ALL" : "case",
+    "AT+ESS" : "case",
+    "COM" : "case",
+    "FRML" : "case",
+    "IN+ABL" : "case",
+    "IN+ALL" : "case",
+    "IN+ESS" : "case",
+    "INS" : "case",
+    "PRIV" : "case",
+    "PRT" : "case",
+    "TRANS" : "case",
+    "ESS" : "case",
+    "VOC" : "case",
     "1" : "person",
     "2" : "person",
-    "3" : "person"
+    "3" : "person",
+    "ACT" : "voice",
+    "PASS" : "voice",
+    "ANIM" : "animacy",
+    "INAN" : "animacy",
+    "CMPR" : "comparison",
+    "RL" : "comparison",
+    "PSS" : "possession",
+    "PSSP" : "possession",
+    "PSSS" : "possession",
+    "PSS1P" : "possession",
+    "PSS1S" : "possession",
+    "PSS2S" : "possession",
+    "PSS2P" : "possession",
+    "PSS3" : "possession",
+    "NEG" : "polarity",
+    "POS" : "polarity",
+    "IPFV" : "aspect",
+    "PFV" : "aspect"
     }
+
 
 label_classes = {"pos" : {"ADJ":1,
                    "ADP":2,
@@ -146,21 +192,32 @@ label_classes = {"pos" : {"ADJ":1,
                    "PROPN":10,
                    "V":11,
                    "V.PTCP":12,
-                   "X":13
+                   "X":13,
+                   "INTJ" :14,
+                   "V.CVB" : 15,
+                   "V.MSDR" :16
                    },
         "gender" : { "FEM":1,
                      "NEUT":2,
-                     "MASC":3
+                     "MASC":3,
+                     "FEM_NEUT":4,
+                     "MASC_NEUT":5,
+                     "FEM_MASC":6
                     },
         "number": { "PL":1,
-                   "SG":2
+                   "SG":2,
+                   "DU":3,
+                   "SG_PL":4
                     },
         "definiteness" : {"DEF":1,
                           "INDF":2
                     },
         "mood" : {"SBJV" :1,
                   "IND": 2,
-                  "IMP": 3
+                  "IMP": 3,
+                  "COND": 4,
+                  "OPT" : 5,
+                  "POT" : 6
                  },
         "finiteness" : {"FIN" :1,
                         "NFIN":2
@@ -172,14 +229,52 @@ label_classes = {"pos" : {"ADJ":1,
         "case" : {"NOM":1,
                   "DAT":2,
                   "ACC":3,
-                  "GEN":4
+                  "GEN":4,
+                  "AT+ABL":5,
+                  "AT+ALL":6,
+                  "AT+ESS":7,
+                  "COM":8,
+                  "FRML":9,
+                  "IN+ABL":10,
+                  "IN+ALL":11,
+                  "IN+ESS":12,
+                  "INS":13,
+                  "PRIV":14,
+                  "PRT":15,
+                  "PRT":16,
+                  "TRANS":17,
+                  "ESS":18,
+                  "VOC":19
                 },
         "person" : {"1":1,
                     "2":2,
                     "3":3
+                },
+        "voice" : {"ACT":1,
+                    "PASS":2
+                },
+        "animacy" : {"ANIM":1,
+                    "INAN":2
+                },
+        "comparison" : {"CMPR":1,
+                    "RL":2
+                },
+        "possession" : {"PSS":1,
+                    "PSSP":2,
+                    "PSSS":3,
+                    "PSS1P":4,
+                    "PSS1S":5,
+                    "PSS2P":6,
+                    "PSS2S":7,
+                    "PSS3":8
+                },
+        "polarity" : {"POS":1,
+                    "NEG":2
+                },
+        "aspect" : {"IPFV":1,
+                    "PFV":2
                 }
     }
-
 
 def make_inputs(sentences: List[str]):
     for sentence_id, inputs in enumerate(sentences, 1):
@@ -364,6 +459,7 @@ def preprocess(sequences: List[str],
 
 
 def get_encoded_tokens(encoded_sequences: List[List[np.array]], 
+                       language: str,
                        batch_size: int,  
                        tag_sequences: List[str],
                        bpe_sequences: List[str],
@@ -377,7 +473,7 @@ def get_encoded_tokens(encoded_sequences: List[List[np.array]],
         #print("i",i)
         #print("len batch", len(batch))
         for j, encoded_sequence in enumerate(batch): # encoded_sequence: np.array of shape (max_seq_len, hidden_dimension)
-            print("j", j)
+            #print("j", j)
             bpe_sentence = bpe_sequences[(i*batch_size)+j].split(' ')
             tag_sequence = tag_sequences[(i*batch_size)+j]
             token_sequence = token_sequences[(i*batch_size)+j]
@@ -417,16 +513,27 @@ def get_encoded_tokens(encoded_sequences: List[List[np.array]],
                                                             "finiteness": None,
                                                             "tense":  None,
                                                             "pos":  None,
-                                                            "person" : None}
+                                                            "person" : None,
+                                                            "voice" : None,
+                                                            "animacy": None,
+                                                            "aspect": None,
+                                                            "polarity" : None,
+                                                            "possession" : None,
+                                                            "comparison" : None,
+                                                            "possession" : None
+                                                            }
                                                  )
                 # get gender, number, case etc
+                print("features ", features, "language ", language) # TODO debug Finnish
                 if features is not None:
                     for tag in features:
-                        if tag != "PASS" and tag !="REFL" and tag !="NEG":
+                        if language == "de" and tag != "PASS" and tag !="REFL" and tag !="NEG": # German has only NEG annotations, but not POS, also only PASS, but not ACT. valency only has REFL annotations in all languages
                             morph_class = morph_features[tag]
                             training_token.features[morph_class] = tag
-                
-                
+                        elif tag !="REFL":
+                            morph_class = morph_features[tag]
+                            training_token.features[morph_class] = tag
+                            
                 bpe_iterator +=1
                 training_tokens.append(training_token)
                 
@@ -437,7 +544,7 @@ def get_encoded_tokens(encoded_sequences: List[List[np.array]],
         elif counted_max_length_subwords > fixed_max_length_subwords:
             logger.warn("Number of subword units exceeds given max length in data. Given max length: {}, counted max length {}".format(fixed_max_length_subwords, counted_max_length_subwords))
             fixed_max_length_subwords = counted_max_length_subwords
-    print(len(training_tokens))
+    #print(len(training_tokens))
     return training_tokens, fixed_max_length_subwords
     
 def make_classifier_input(training_tokens: List[ClassifierInput], 
@@ -467,30 +574,93 @@ def make_classifier_input(training_tokens: List[ClassifierInput],
             label_id = label_classes[feature][label]
             #print(label, label_id)
             labels.append(label_id)
-            encoded_tokens.append(encoded_word) # encoded word = list of list of subword hidden states 
+            encoded_tokens.append(encoded_word) # encoded word = list of list of subword hidden states
+        else:
+            logger.error("Found no label in training token: {}".format(training_token))
+            exit(0)
     
     labels = np.array(labels, dtype=data_type) # shape (sample_size,)
     encoded_tokens = np.array([np.array(seq, dtype=data_type) for seq in encoded_tokens], dtype=data_type) # shape (sample_size, max_length_subwords, hidden_dimension)
     #print(encoded_tokens.shape, encoded_tokens.dtype)
     return labels,encoded_tokens
 
-def train_logistic_regression(labels: np.array, encoded_sequences: np.array):
-    model = LogisticRegression(solver='lbfgs', multi_class='multinomial', max_iter=5000)
+def train_logistic_regression(labels: np.array, encoded_sequences: np.array, max_iter: int, context: mx.context.Context):
+    model = LogisticRegression(solver='lbfgs', multi_class='multinomial', max_iter=max_iter)
     #model = LogisticRegression(solver='liblinear', multi_class='ovr', max_iter=5000)
     (sample_size, max_length_subwords, hidden_dimension) = encoded_sequences.shape
     (sample_size_labels, ) = labels.shape
     if sample_size != sample_size_labels:
         print("shapes do not match, encoded sequences have {} samples, but labels have {}".format(sample_size, sample_size_labels))
         exit(0)
-    encoded_sequences = encoded_sequences.reshape(sample_size, max_length_subwords * hidden_dimension)
+    # use gpu for reshape, takes too long on cpu
+    mx_encoded_sequences = mx.nd.array((encoded_sequences),context)
+    mx_encoded_sequences = mx_encoded_sequences.reshape(sample_size, max_length_subwords * hidden_dimension)
+    encoded_sequences = mx_encoded_sequences.asnumpy()
+    #encoded_sequences = encoded_sequences.reshape(sample_size, max_length_subwords * hidden_dimension)
 
     #print("dtypes: ", encoded_sequences.dtype, labels.dtype)
     #print("shapes: ", encoded_sequences.shape, labels.shape)
-    print("training on sample size: ", sample_size)
+    logger.info("training on sample size: %s", sample_size)
     model.fit(encoded_sequences, labels)
     return model
     
+def train_logistic_regression_gpu(labels: np.array, encoded_sequences: np.array, max_iter: int, context: mx.context.Context, batch_size: int, net: mx.gluon.nn.Sequential, epochs: int=10, patience: int=10):
+    encoded_sequences = mx.nd.array((encoded_sequences),context)
+    #(sample_size, max_length_subwords, hidden_dimension) = encoded_sequences.shape
+    #encoded_sequences = encoded_sequences.reshape(sample_size, max_length_subwords * hidden_dimension)
+    labels = mx.nd.array((labels),context)
+    logger.info("training on sample size: %s", len(labels))
+        
+    train_set = mx.gluon.data.ArrayDataset(encoded_sequences, labels)
+    train_dataloader = mx.gluon.data.DataLoader(train_set, batch_size=batch_size, shuffle=True)
     
+    softmax_cross_entropy = mx.gluon.loss.SoftmaxCrossEntropyLoss()
+    trainer = mx.gluon.Trainer(net.collect_params(), 'sgd', {'learning_rate': 0.1, 'wd' : 0.0001})
+
+    num_not_improved =0
+    best_acc =0.0
+    for epoch in range(epochs):
+        cumulative_train_loss = 0
+        for i, (data, label) in enumerate(train_dataloader):
+            with mx.autograd.record():
+                # Do forward pass on a batch of training data
+                data = data.as_in_context(context)
+                label = label.as_in_context(context)
+                output = net(data)
+
+                # Calculate loss for the training data batch
+                loss_result = softmax_cross_entropy(output, label)
+
+            # Calculate gradients
+            loss_result.backward()
+
+            # Update parameters of the network
+            trainer.step(batch_size)
+
+            # sum losses of every batch
+            cumulative_train_loss += mx.nd.sum(loss_result).asscalar()
+
+        avg_train_loss = cumulative_train_loss / len(encoded_sequences)
+        acc = evaluate_accuracy(train_dataloader, net, context)
+        logger.info("epoch {}, average training loss {}, accuracy {}".format(epoch, avg_train_loss ,acc))
+        if acc > best_acc:
+            best_acc = acc
+        else:
+            num_not_improved +=1
+        if num_not_improved >= patience:
+            logger.info("Accuracy has not improved for {} epochs. Stopping Training.".format(num_not_improved))
+            return model
+    return model
+
+def evaluate_accuracy(data_iterator, net, context):
+    acc = mx.metric.Accuracy()
+    for i, (data, label) in enumerate(data_iterator):
+        data = data.as_in_context(context)
+        label = label.as_in_context(context)
+        output = net(data)
+        predictions = mx.nd.argmax(output, axis=1)
+        acc.update(preds=predictions, labels=label)
+    return acc.get()[1]
 
 def main():
     parser = argparse.ArgumentParser(description='Encode given sequences and use encoder hidden states to train a logistic regression model that labels morphology.')
@@ -509,6 +679,10 @@ def main():
                         type=arguments.int_greater_or_equal(1),
                         default=10,
                         help='Width of buckets in tokens. Default: %(default)s.')
+    parser.add_argument('--max-iter',
+                        type=int,
+                        default=3000,
+                        help='Maximum number of iterations for logistic regression classifier training. Default: %(default)s.')
     parser.add_argument('--truecase-model', required=True,
                         type=str,
                         help='Model for moses truecaser.')
@@ -524,10 +698,26 @@ def main():
     parser.add_argument('--feature', required=True,
                         type=str,
                         help='Feature to train classifer for. Features in conllu: gender, pos, tense, case, finiteness, definiteness, person, mood, number.')
-    
-    
+    parser.add_argument('--train-on-gpu',
+                        action='store_true',
+                        help='Use Gluon to train logistic regression model on GPU (instead of sklearn on CPU). Default: %(default)s.')
+    parser.add_argument('--epochs',
+                        type=int, 
+                        default=10,
+                        help='Train gluon model for n epochs. Default: %(default)s.')
+    parser.add_argument('--patience',
+                        type=int, 
+                        default=10,
+                        help='Stop training after n epochs that accuracy in training has not improved. Default: %(default)s.')
+    parser.add_argument('--language',
+                        type=str, 
+                        default="de",
+                        help='Conll Language. Default: %(default)s.')
     
     args = parser.parse_args()
+    
+    setup_main_logger(file_logging=False,
+                      console=True)
     
     logger.info("Features in conllu need to be separated by '|', not ';'") # cannot handle sentences that have a non-final punctuation mark as their last token -> normalizer attaches it to previous word, changed tokenization ends in chaos
     data_file = open(args.conll, "r", encoding="utf-8")
@@ -555,6 +745,7 @@ def main():
 
     max_source = max([source_sentence.split() for source_sentence in bpe_sequences], key=len)
     max_seq_len_source = len(max_source) +1 # <eos>
+    logger.info("creating encoder model")
     s_model = source_model.SourceModel(config=model_config,
                                          params_fname=params_fname,
                                          context=context,
@@ -562,7 +753,8 @@ def main():
     s_model.initialize(max_batch_size=args.batch_size,
                        max_input_length=max_seq_len_source)
     inputs = make_inputs(bpe_sequences)
- 
+    
+    logger.info("encoding sentences")
     encoded_sequences = encode(inputs=inputs,
            max_input_length=max_seq_len_source,
            max_batch_size=args.batch_size,
@@ -571,25 +763,41 @@ def main():
            s_model=s_model,
            bucket_source_width=args.bucket_width,
            fill_up_batches=True)
-
+    
+    logger.info("match encoded sequences to labels")
     training_tokens, max_length_subwords = get_encoded_tokens(encoded_sequences=encoded_sequences,
+                                         language=args.language,
                                          batch_size=args.batch_size,
                                          tag_sequences=tag_sequences,
                                          bpe_sequences=bpe_sequences,
                                          token_sequences=token_sequences,
                                          fixed_max_length_subwords=args.max_bpe_units_per_word)
-
+    
+    logger.info("create training samples for LR")
     labels, encoded_tokens = make_classifier_input(training_tokens, args.feature ,max_length_subwords) # labels: (sample_size,), encoded_tokens: (sample_size, max_length_subwords, hidden_dimension)
     
-    trained_model = train_logistic_regression(labels, encoded_tokens)
-    joblib.dump(trained_model, args.out_model)
+    logger.info("train classifier")
+    if args.train_on_gpu:
+        num_outputs = len(label_classes[args.feature])
+        net = mx.gluon.nn.Sequential()
+        with net.name_scope():
+            #net.add(mx.gluon.nn.Dense(1024, activation="tanh"))
+            net.add(mx.gluon.nn.Dense(num_outputs))
+        #net.collect_params().initialize(mx.init.Normal(sigma=1.), ctx=context)
+        net.initialize(mx.init.Xavier(), ctx=context)
+        trained_model = train_logistic_regression_gpu(labels, encoded_tokens, args.max_iter, context, args.batch_size, net, args.epochs, args.patience)
+        net.save_parameters(args.out_model)
+    else:
+        trained_model = train_logistic_regression(labels, encoded_tokens, args.max_iter, context)
+        joblib.dump(trained_model, args.out_model)
             
     regression_config = { "sockeye-model": args.sockeye_model,
                           "truecase-model" : args.truecase_model,
                           "bpe-model" : args.bpe_model,
                           "bpe-vocab" : args.bpe_vocab,
                           "feature" :  args.feature,
-                          "max_length_subwords" : max_length_subwords
+                          "max_length_subwords" : max_length_subwords,
+                          "language" : args.language
                         }
     
     with open( args.out_model + ".conf.json", 'w') as json_file:
