@@ -623,9 +623,10 @@ class TranslatorInput:
     :param factors: Optional list of additional factor sequences.
     :param constraints: Optional list of target-side constraints.
     :param pass_through_dict: Optional raw dictionary of arbitrary input data.
+    :param force_prefix: Optional target token to force at the beginning of decoding.
     """
 
-    __slots__ = ('sentence_id', 'tokens', 'factors', 'constraints', 'avoid_list', 'pass_through_dict')
+    __slots__ = ('sentence_id', 'tokens', 'factors', 'constraints', 'avoid_list', 'pass_through_dict', 'force_prefix')
 
     def __init__(self,
                  sentence_id: SentenceId,
@@ -633,13 +634,15 @@ class TranslatorInput:
                  factors: Optional[List[Tokens]] = None,
                  constraints: Optional[List[Tokens]] = None,
                  avoid_list: Optional[List[Tokens]] = None,
-                 pass_through_dict: Optional[Dict] = None) -> None:
+                 pass_through_dict: Optional[Dict] = None,
+                 force_prefix: Optional[str] = None) -> None:
         self.sentence_id = sentence_id
         self.tokens = tokens
         self.factors = factors
         self.constraints = constraints
         self.avoid_list = avoid_list
         self.pass_through_dict = pass_through_dict
+        self.force_prefix = force_prefix
 
     def __str__(self):
         return 'TranslatorInput(%s, %s, factors=%s, constraints=%s, avoid=%s)' \
@@ -681,7 +684,8 @@ class TranslatorInput:
                                   factors=factors,
                                   constraints=constraints,
                                   avoid_list=self.avoid_list,
-                                  pass_through_dict=pass_through_dict)
+                                  pass_through_dict=pass_through_dict,
+                                  force_prefix=self.force_prefix)
 
     def with_eos(self) -> 'TranslatorInput':
         """
@@ -693,7 +697,8 @@ class TranslatorInput:
                                         self.factors] if self.factors is not None else None,
                                constraints=self.constraints,
                                avoid_list=self.avoid_list,
-                               pass_through_dict=self.pass_through_dict)
+                               pass_through_dict=self.pass_through_dict,
+                               force_prefix=self.force_prefix)
 
 
 class BadTranslatorInput(TranslatorInput):
@@ -765,6 +770,9 @@ def make_input_from_dict(sentence_id: SentenceId, input_dict: Dict) -> Translato
         # List of phrases that must appear in the output
         constraints = input_dict.get(C.JSON_CONSTRAINTS_KEY)
 
+        # force prefix
+        force_prefix = input_dict.get(C.JSON_FORCE_KEY)
+
         # If there is overlap between positive and negative constraints, assume the user wanted
         # the words, and so remove them from the avoid_list (negative constraints)
         if constraints is not None and avoid_list is not None:
@@ -781,7 +789,8 @@ def make_input_from_dict(sentence_id: SentenceId, input_dict: Dict) -> Translato
             constraints = [list(data_io.get_tokens(constraint)) for constraint in constraints]
 
         return TranslatorInput(sentence_id=sentence_id, tokens=tokens, factors=factors,
-                               constraints=constraints, avoid_list=avoid_list, pass_through_dict=input_dict)
+                               constraints=constraints, avoid_list=avoid_list, pass_through_dict=input_dict,
+                               force_prefix=force_prefix)
 
     except Exception as e:
         logger.exception(e, exc_info=True) if not is_python34() else logger.error(e)  # type: ignore
@@ -1497,6 +1506,7 @@ class Translator:
     def _get_inference_input(self,
                              trans_inputs: List[TranslatorInput]) -> Tuple[mx.nd.NDArray,
                                                                            int,
+                                                                           List[Optional[int]],
                                                                            List[Optional[constrained.RawConstraintList]],
                                                                            List[Optional[constrained.RawConstraintList]],
                                                                            mx.nd.NDArray]:
@@ -1516,6 +1526,7 @@ class Translator:
         source = mx.nd.zeros((batch_size, bucket_key, self.num_source_factors), ctx=self.context)
         raw_constraints = [None] * batch_size  # type: List[Optional[constrained.RawConstraintList]]
         raw_avoid_list = [None] * batch_size  # type: List[Optional[constrained.RawConstraintList]]
+        force_prefixes = [None] * batch_size  # type: List[Optional[int]]
 
         max_output_lengths = []  # type: List[int]
         for j, trans_input in enumerate(trans_inputs):
@@ -1544,7 +1555,14 @@ class Translator:
                     logger.warning("Sentence %s: %s was found in the list of phrases to avoid; "
                                    "this may indicate improper preprocessing.", trans_input.sentence_id, C.UNK_SYMBOL)
 
-        return source, bucket_key, raw_constraints, raw_avoid_list, mx.nd.array(max_output_lengths, ctx=self.context, dtype='int32')
+            if trans_input.force_prefix is not None:
+                force_id = data_io.tokens2ids([trans_input.force_prefix], self.vocab_target)[0]
+                if force_id == self.unk_id:
+                    logger.warning("Sentence %s: %s was found to be the prefix to force-decode; "
+                                   "this may indicate improper preprocessing.", trans_input.sentence_id, C.UNK_SYMBOL)
+                force_prefixes[j] = force_id
+
+        return source, bucket_key, force_prefixes, raw_constraints, raw_avoid_list, mx.nd.array(max_output_lengths, ctx=self.context, dtype='int32')
 
     def _make_result(self,
                      trans_input: TranslatorInput,
@@ -1600,6 +1618,7 @@ class Translator:
     def _translate_nd(self,
                       source: mx.nd.NDArray,
                       source_length: int,
+                      force_prefixes: List[Optional[int]],
                       raw_constraints: List[Optional[constrained.RawConstraintList]],
                       raw_avoid_list: List[Optional[constrained.RawConstraintList]],
                       max_output_lengths: mx.nd.NDArray) -> List[Translation]:
@@ -1614,6 +1633,7 @@ class Translator:
         """
         return self._get_best_from_beam(*self._beam_search(source,
                                                            source_length,
+                                                           force_prefixes,
                                                            raw_constraints,
                                                            raw_avoid_list,
                                                            max_output_lengths))
@@ -1701,6 +1721,7 @@ class Translator:
     def _beam_search(self,
                      source: mx.nd.NDArray,
                      source_length: int,
+                     force_prefixes: List[Optional[int]],
                      raw_constraint_list: List[Optional[constrained.RawConstraintList]],
                      raw_avoid_list: List[Optional[constrained.RawConstraintList]],
                      max_output_lengths: mx.nd.NDArray) -> Tuple[np.ndarray,
@@ -1715,6 +1736,8 @@ class Translator:
 
         :param source: Source ids. Shape: (batch_size, bucket_key, num_factors).
         :param source_length: Max source length.
+        :param force_prefixes: List of target ids to be force-decoded before actual beam search.
+               Shape: (batch_size).
         :param raw_constraint_list: A list of optional lists containing phrases (as lists of target word IDs)
                that must appear in each output.
         :param raw_avoid_list: A list of optional lists containing phrases (as lists of target word IDs)
@@ -1841,6 +1864,12 @@ class Translator:
             # There is special treatment for finished and inactive rows: inactive rows are inf everywhere;
             # finished rows are inf everywhere except column zero, which holds the accumulated model score
             scores = self._update_scores.forward(target_dists, finished, inactive, scores_accumulated, pad_dist)
+
+            # force-decode a target id, by setting all other positions to np.inf
+            if force_prefixes and t == 1:
+                target_dists = mx.nd.full(shape=target_dists.shape, val=np.inf, ctx=self.context)
+                force_indices = mx.nd.repeat(data=force_prefixes, repeats=self.beam_size)
+                target_dists[mx.nd.arange(batch_size * self.beam_size), force_indices] = 1.0
 
             # Mark entries that should be blocked as having a score of np.inf
             if self.global_avoid_trie or any(raw_avoid_list):
