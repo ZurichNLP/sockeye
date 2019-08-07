@@ -79,6 +79,7 @@ def main():
         feature = regression_config["feature"] 
         max_length_subwords = regression_config["max_length_subwords"]
         language = regression_config["language"]
+        target = regression_config["target"]
         
         # load vocab, config + sockeye model
         source_vocabs = vocab.load_source_vocabs(sockeye_model)
@@ -91,7 +92,7 @@ def main():
         
         # sentences longer than in the conll training data 
 
-        bpe_sequences, tag_sequences = train_morphology.preprocess(token_sequences, tags, truecase_model, bpe_model, bpe_vocab)
+        bpe_sequences, tag_sequences = train_morphology.preprocess(token_sequences, tags, truecase_model, bpe_model, bpe_vocab, target)
     
         max_source = max([source_sentence.split() for source_sentence in bpe_sequences], key=len)
         max_seq_len_source = len(max_source) +1 # <eos>

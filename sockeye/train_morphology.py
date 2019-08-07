@@ -124,7 +124,7 @@ morph_features = {
     "SG" : "number",
     "PL" : "number",
     "DU" : "number",
-    "SG_PL" : "number",
+    "PL_SG" : "number",
     "DEF" : "definiteness",
     "INDF" : "definiteness",
     "SBJV" : "mood",
@@ -207,7 +207,7 @@ label_classes = {"pos" : {"ADJ":1,
         "number": { "PL":1,
                    "SG":2,
                    "DU":3,
-                   "SG_PL":4
+                   "PL_SG":4
                     },
         "definiteness" : {"DEF":1,
                           "INDF":2
@@ -275,6 +275,61 @@ label_classes = {"pos" : {"ADJ":1,
                     "PFV":2
                 }
     }
+        
+num_labels = { "de": {"person":3, 
+                      "case": 4, 
+                      "pos":12, 
+                      "definiteness":2, 
+                      "gender":3, 
+                      "finiteness": 2, 
+                      "mood":3, 
+                      "number":2, 
+                      "tense":2},
+              "fi" : {"person":3,
+                      "case":15, 
+                      "voice":2, 
+                      "pos":13, 
+                      "comparison":2, 
+                      "mood":5, 
+                      "finiteness":2, 
+                      "number":2, 
+                      "tense":2, 
+                      "possession":5},
+              "fr": {"person":3,
+                     "case":4,
+                     "pos":13,
+                     "mood":4, 
+                     "definiteness":2,
+                     "gender":3, 
+                     "finiteness":2,
+                     "tense":3,
+                     "number":2},
+              "en": {"person":3,
+                     "case":2,
+                     "pos":14,
+                     "comparison":2,
+                     "definiteness":2,
+                     "gender":3, 
+                     "finiteness":2,
+                     "mood":2, 
+                     "tense":2,
+                     "number":2},
+              "cs":{"person":3,
+                     "case":7,
+                     "pos":14,
+                     "voice":2,
+                     "animacy":2,
+                     "comparison":2,
+                     "mood":3,
+                     "gender":6, 
+                     "finiteness":2,
+                     "tense":3,
+                     "aspect":2,
+                     "polarity":2,
+                     "number":4,
+                     "possession":3}
+    
+    }
 
 def make_inputs(sentences: List[str]):
     for sentence_id, inputs in enumerate(sentences, 1):
@@ -319,29 +374,11 @@ def encode(inputs: List[Input],
         # split into chunks
         input_chunks = []  # type: List[IndexedTranslatorInput]
         for input_idx, input in enumerate(inputs):
-                #print(input_idx)
-                #max_input_length_without_eos = max_input_length -1 # don't need this since we use max_input_length=maximum length of sequence in conll
-                # oversized input 
-                #if len(input.tokens) > max_input_length_without_eos:
-                    #logger.debug(
-                            #"Input %s has length (%d) that exceeds max input length (%d). "
-                            #"Splitting into chunks of size %d.",
-                            #trans_input.sentence_id, len(trans_input.tokens),
-                            #buckets_source[-1], max_input_length_without_eos)
-                    #chunks = [input_chunk.with_eos()
-                                  #for input_chunk in input.chunks(max_input_length_without_eos)]
-                    #input_chunks.extend([IndexedInput(trans_input_idx, chunk_idx, chunk_input)
-                                             #for chunk_idx, chunk_input in enumerate(chunks)])
-                    ## regular input
-                #else:
+              
                 input_chunks.append(IndexedInput(input_idx,
                                                          chunk_idx=0,
                                                          input=input.with_eos()))
 
-
-
-        # Sort longest to shortest (to rather fill batches of shorter than longer sequences)
-       # input_chunks = sorted(input_chunks, key=lambda chunk: len(chunk.input.tokens), reverse=True)
         # translate in batch-sized blocks over input chunks
         batch_size = max_batch_size if fill_up_batches else min(len(input_chunks), self.max_batch_size)
         encoded_sequences = [] # list(number of batches, batch_size, seq_len, num_hidden)
@@ -402,7 +439,8 @@ def preprocess(sequences: List[str],
                features: List[OrderedDict],
                truecase_model: str, 
                bpe_model: str,
-               bpe_vocab: str):
+               bpe_vocab: str,
+               target: str = None):
     
     bpe_codes = codecs.open(bpe_model, encoding='utf-8')
     vocab = codecs.open(bpe_vocab, encoding='utf-8')
@@ -447,6 +485,10 @@ def preprocess(sequences: List[str],
                 tags_list[i] = feature_list[feature_iterator]
             #print("i=",i, "feat_it=", feature_iterator,"subword=", bpe_subword, "tag=", feature_list[feature_iterator])
             #print("tags list: ", tags_list)
+        if target != None:
+            tag = "<2" + target + ">"
+            bpe_list.insert(0, tag)
+            tags_list.insert(0,None)
             
         preprocessed_sequences.append(bpe_split)
         tag_sequences.append(tags_list)
@@ -454,7 +496,7 @@ def preprocess(sequences: List[str],
             logger.warn("subword units and tag sequence have different length!")
             logger.warn("bpe: {}, tags {}".format(len(bpe_list), len(tags_list)))
             exit(0)
-            
+
     return preprocessed_sequences, tag_sequences
 
 
@@ -524,16 +566,18 @@ def get_encoded_tokens(encoded_sequences: List[List[np.array]],
                                                             }
                                                  )
                 # get gender, number, case etc
-                print("features ", features, "language ", language) # TODO debug Finnish
+                #print("features ", features, "language ", language) # TODO debug Finnish
                 if features is not None:
                     for tag in features:
                         if language == "de" and tag != "PASS" and tag !="REFL" and tag !="NEG": # German has only NEG annotations, but not POS, also only PASS, but not ACT. valency only has REFL annotations in all languages
                             morph_class = morph_features[tag]
                             training_token.features[morph_class] = tag
-                        elif tag !="REFL":
+                        elif language == "fi" and tag !="REFL" and tag !="NEG" :
                             morph_class = morph_features[tag]
                             training_token.features[morph_class] = tag
-                            
+                        elif language == "cs" and tag !="REFL" :
+                            morph_class = morph_features[tag]
+                            training_token.features[morph_class] = tag
                 bpe_iterator +=1
                 training_tokens.append(training_token)
                 
@@ -553,6 +597,7 @@ def make_classifier_input(training_tokens: List[ClassifierInput],
     encoded_tokens =[]
     labels = []
     
+    # get only tokens that have the given feature
     for training_token in training_tokens:
         
         label = training_token.features[feature]
@@ -576,8 +621,8 @@ def make_classifier_input(training_tokens: List[ClassifierInput],
             labels.append(label_id)
             encoded_tokens.append(encoded_word) # encoded word = list of list of subword hidden states
         else:
-            logger.error("Found no label in training token: {}".format(training_token))
-            exit(0)
+            logger.debug("Found no label in training token for feature: {} {}".format(training_token, feature))
+    
     
     labels = np.array(labels, dtype=data_type) # shape (sample_size,)
     encoded_tokens = np.array([np.array(seq, dtype=data_type) for seq in encoded_tokens], dtype=data_type) # shape (sample_size, max_length_subwords, hidden_dimension)
@@ -605,15 +650,23 @@ def train_logistic_regression(labels: np.array, encoded_sequences: np.array, max
     return model
     
 def train_logistic_regression_gpu(labels: np.array, encoded_sequences: np.array, max_iter: int, context: mx.context.Context, batch_size: int, net: mx.gluon.nn.Sequential, epochs: int=10, patience: int=10):
-    encoded_sequences = mx.nd.array((encoded_sequences),context)
+    
+    try:
+        encoded_sequences = mx.nd.array((encoded_sequences),context)
+        
+    except mx.base.MXNetError: 
+        # weird oom error, no fix yet 
+        logger.error("out of memory, stopped")
+        exit(1)
+       
     #(sample_size, max_length_subwords, hidden_dimension) = encoded_sequences.shape
     #encoded_sequences = encoded_sequences.reshape(sample_size, max_length_subwords * hidden_dimension)
     labels = mx.nd.array((labels),context)
-    logger.info("training on sample size: %s", len(labels))
-        
     train_set = mx.gluon.data.ArrayDataset(encoded_sequences, labels)
     train_dataloader = mx.gluon.data.DataLoader(train_set, batch_size=batch_size, shuffle=True)
     
+    
+    logger.info("training on sample size: %s", len(labels))
     softmax_cross_entropy = mx.gluon.loss.SoftmaxCrossEntropyLoss()
     trainer = mx.gluon.Trainer(net.collect_params(), 'sgd', {'learning_rate': 0.1, 'wd' : 0.0001})
 
@@ -707,12 +760,16 @@ def main():
                         help='Train gluon model for n epochs. Default: %(default)s.')
     parser.add_argument('--patience',
                         type=int, 
-                        default=10,
+                        default=50,
                         help='Stop training after n epochs that accuracy in training has not improved. Default: %(default)s.')
     parser.add_argument('--language',
                         type=str, 
                         default="de",
                         help='Conll Language. Default: %(default)s.')
+    parser.add_argument('--target',
+                        type=str, 
+                        default=None,
+                        help='Target language (will insert <2lang> at beginning of each sentence). Default: %(default)s.')
     
     args = parser.parse_args()
     
@@ -741,10 +798,13 @@ def main():
     token_sequences = [[token["form"] for token in sentence] for sentence in conll]
     tags = [[token["feats"] for token in sentence] for sentence in conll]
 
-    bpe_sequences, tag_sequences = preprocess(token_sequences, tags, args.truecase_model, args.bpe_model, args.bpe_vocab)
+    bpe_sequences, tag_sequences = preprocess(token_sequences, tags, args.truecase_model, args.bpe_model, args.bpe_vocab, args.target)
 
     max_source = max([source_sentence.split() for source_sentence in bpe_sequences], key=len)
-    max_seq_len_source = len(max_source) +1 # <eos>
+    if args.target != None:
+        max_seq_len_source = len(max_source) +2 # <eos>, <2trg>
+    else:
+        max_seq_len_source = len(max_source) +1 # <eos>
     logger.info("creating encoder model")
     s_model = source_model.SourceModel(config=model_config,
                                          params_fname=params_fname,
@@ -777,7 +837,14 @@ def main():
     labels, encoded_tokens = make_classifier_input(training_tokens, args.feature ,max_length_subwords) # labels: (sample_size,), encoded_tokens: (sample_size, max_length_subwords, hidden_dimension)
     
     logger.info("train classifier")
+    # limit size of train set to 250k
+    cutoff=250000
+    if len(labels) > cutoff:
+        (encoded_tokens, rest) = np.split(encoded_tokens, [cutoff])
+        (labels, rest) = np.split(labels, [cutoff])
+    
     if args.train_on_gpu:
+        #num_outputs = num_labels[args.language][args.feature]
         num_outputs = len(label_classes[args.feature])
         net = mx.gluon.nn.Sequential()
         with net.name_scope():
@@ -797,7 +864,8 @@ def main():
                           "bpe-vocab" : args.bpe_vocab,
                           "feature" :  args.feature,
                           "max_length_subwords" : max_length_subwords,
-                          "language" : args.language
+                          "language" : args.language,
+                          "target" : args.target
                         }
     
     with open( args.out_model + ".conf.json", 'w') as json_file:
