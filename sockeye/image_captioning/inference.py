@@ -148,6 +148,8 @@ class ImageCaptioner(Translator):
         image_paths = [None for _ in range(batch_size)]  # type: List[Optional[str]]
         raw_constraints = [None for _ in range(batch_size)]  # type: List[Optional[constrained.RawConstraintList]]
         raw_avoid_list = [None for _ in range(batch_size)]  # type: List[Optional[constrained.RawConstraintList]]
+        force_prefixes = [None] * batch_size  # type: List[Optional[int]]
+
         for j, trans_input in enumerate(trans_inputs):
             # Join relative path with absolute
             path = trans_input.tokens[0]
@@ -165,7 +167,7 @@ class ImageCaptioner(Translator):
 
         max_input_length = 0
         max_output_lengths = [self.models[0].get_max_output_length(max_input_length)] * len(image_paths)
-        return mx.nd.array(images), max_input_length, raw_constraints, raw_avoid_list, mx.nd.array(max_output_lengths,
+        return mx.nd.array(images), max_input_length, force_prefixes, raw_constraints, raw_avoid_list, mx.nd.array(max_output_lengths,
                                                                                                    ctx=self.context,
                                                                                                    dtype='int32')
 

@@ -1866,7 +1866,7 @@ class Translator:
             scores = self._update_scores.forward(target_dists, finished, inactive, scores_accumulated, pad_dist)
 
             # force-decode a target id, by setting all other positions to np.inf
-            if force_prefixes and t == 1:
+            if t == 1 and None not in force_prefixes:
                 target_dists = mx.nd.full(shape=target_dists.shape, val=np.inf, ctx=self.context)
                 force_indices = mx.nd.repeat(data=force_prefixes, repeats=self.beam_size)
                 target_dists[mx.nd.arange(batch_size * self.beam_size), force_indices] = 1.0
