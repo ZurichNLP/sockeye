@@ -1867,7 +1867,6 @@ class Translator:
 
             # force-decode a target id, by setting all other positions to np.inf
             if t == 1 and None not in force_prefixes:
-                force_prefixes = np.arange(0, batch_size)
 
                 force_prefixes = mx.nd.array(force_prefixes, ctx=self.context, dtype='int32')
                 force_indices = mx.nd.repeat(data=force_prefixes, repeats=self.beam_size)
