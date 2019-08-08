@@ -1865,20 +1865,21 @@ class Translator:
             # finished rows are inf everywhere except column zero, which holds the accumulated model score
             scores = self._update_scores.forward(target_dists, finished, inactive, scores_accumulated, pad_dist)
 
-            # force-decode a target id, by setting all other positions to np.inf
+            # force-decode a target id, by assigning it a small value
             if t == 1 and None not in force_prefixes:
 
                 force_prefixes = mx.nd.array(force_prefixes, ctx=self.context, dtype='int32')
                 force_indices = mx.nd.repeat(data=force_prefixes, repeats=self.beam_size)
                 diagonal_indices = mx.nd.arange(0, batch_size * self.beam_size, dtype='int32', ctx=self.context)
 
-                target_dists_mask = mx.nd.full(shape=target_dists.shape, val=np.inf, ctx=self.context)
-                target_dists_mask[diagonal_indices, force_indices] = 1.0
-                scores_mask = mx.nd.full(shape=scores.shape, val=np.inf, ctx=self.context)
-                scores_mask[diagonal_indices, force_indices] = 1.0
+                force_mask = mx.nd.full(shape=target_dists.shape, val=np.inf, ctx=self.context)
+                # vocabulary ids to force-decode
+                force_mask[diagonal_indices, force_indices] = 1.0
+                # keep alive some hypotheses (first score cannot be inf)
+                force_mask[diagonal_indices, [C.PAD_ID] * (self.beam_size * batch_size)] = 1.0
 
-                target_dists *= target_dists_mask
-                scores *= scores_mask
+                target_dists *= force_mask
+                scores *= force_mask
 
             # Mark entries that should be blocked as having a score of np.inf
             if self.global_avoid_trie or any(raw_avoid_list):
