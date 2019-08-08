@@ -1873,10 +1873,13 @@ class Translator:
                 force_indices = mx.nd.repeat(data=force_prefixes, repeats=self.beam_size)
                 diagonal_indices = mx.nd.arange(0, batch_size * self.beam_size, dtype='int32', ctx=self.context)
 
-                target_dists = mx.nd.full(shape=target_dists.shape, val=np.inf, ctx=self.context)
-                target_dists[diagonal_indices, force_indices] = 1.0
-                scores = mx.nd.full(shape=scores.shape, val=np.inf, ctx=self.context)
-                scores[diagonal_indices, force_indices] = 1.0
+                target_dists_mask = mx.nd.full(shape=target_dists.shape, val=np.inf, ctx=self.context)
+                target_dists_mask[diagonal_indices, force_indices] = 1.0
+                scores_mask = mx.nd.full(shape=scores.shape, val=np.inf, ctx=self.context)
+                scores_mask[diagonal_indices, force_indices] = 1.0
+
+                target_dists *= target_dists_mask
+                scores *= scores_mask
 
             # Mark entries that should be blocked as having a score of np.inf
             if self.global_avoid_trie or any(raw_avoid_list):
