@@ -1867,10 +1867,16 @@ class Translator:
 
             # force-decode a target id, by setting all other positions to np.inf
             if t == 1 and None not in force_prefixes:
-                target_dists = mx.nd.full(shape=target_dists.shape, val=np.inf, ctx=self.context)
+                force_prefixes = np.arange(0, batch_size)
+
                 force_prefixes = mx.nd.array(force_prefixes, ctx=self.context, dtype='int32')
                 force_indices = mx.nd.repeat(data=force_prefixes, repeats=self.beam_size)
-                target_dists[mx.nd.arange(batch_size * self.beam_size, dtype='int32', ctx=self.context), force_indices] = 1.0
+                diagonal_indices = mx.nd.arange(0, batch_size * self.beam_size, dtype='int32', ctx=self.context)
+
+                target_dists = mx.nd.full(shape=target_dists.shape, val=np.inf, ctx=self.context)
+                target_dists[diagonal_indices, force_indices] = 1.0
+                scores = mx.nd.full(shape=scores.shape, val=np.inf, ctx=self.context)
+                scores[diagonal_indices, force_indices] = 1.0
 
             # Mark entries that should be blocked as having a score of np.inf
             if self.global_avoid_trie or any(raw_avoid_list):
