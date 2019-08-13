@@ -1865,22 +1865,6 @@ class Translator:
             # finished rows are inf everywhere except column zero, which holds the accumulated model score
             scores = self._update_scores.forward(target_dists, finished, inactive, scores_accumulated, pad_dist)
 
-            # force-decode a target id, by assigning it a small value
-            if t == 1 and None not in force_prefixes:
-
-                force_prefixes = mx.nd.array(force_prefixes, ctx=self.context, dtype='int32')
-                force_indices = mx.nd.repeat(data=force_prefixes, repeats=self.beam_size)
-                diagonal_indices = mx.nd.arange(0, batch_size * self.beam_size, dtype='int32', ctx=self.context)
-
-                force_mask = mx.nd.full(shape=target_dists.shape, val=np.inf, ctx=self.context)
-                # vocabulary ids to force-decode
-                force_mask[diagonal_indices, force_indices] = 1.0
-                # keep alive some hypotheses (first score cannot be inf)
-                force_mask[diagonal_indices, [C.PAD_ID] * (self.beam_size * batch_size)] = 1.0
-
-                target_dists *= force_mask
-                scores *= force_mask
-
             # Mark entries that should be blocked as having a score of np.inf
             if self.global_avoid_trie or any(raw_avoid_list):
                 block_indices = avoid_states.avoid()
@@ -1901,6 +1885,17 @@ class Translator:
                     scores *= first_step_mask
 
                 best_hyp_indices, best_word_indices, scores_accumulated = self._top(scores, offset)
+
+            # force-decode a prefix for each sentence in the batch if not None
+            if t == 1 and None not in force_prefixes:
+
+                force_prefixes = mx.nd.array(force_prefixes, ctx=self.context, dtype='int32')
+                force_indices = mx.nd.repeat(data=force_prefixes, repeats=self.beam_size)
+
+                best_word_indices = force_indices
+
+                scores_accumulated = scores_accumulated[batch_indices]
+                scores_accumulated = mx.nd.repeat(data=scores_accumulated, repeats=self.beam_size).reshape((-1, 1))
 
             # Constraints for constrained decoding are processed sentence by sentence
             if any(raw_constraint_list):
