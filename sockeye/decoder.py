@@ -311,8 +311,6 @@ class TransformerDecoder(Decoder):
         return target, lengths, target_embed_max_length
 
     def decode_sequence_with_sampling(self,
-                                      source_encoded: mx.sym.Symbol,
-                                      source_encoded_lengths: mx.sym.Symbol,
                                       source_encoded_max_length: int,
                                       target_embed: mx.sym.Symbol,
                                       target_embed_lengths: mx.sym.Symbol,
@@ -323,8 +321,6 @@ class TransformerDecoder(Decoder):
         since previous target embeddings could be sampled instead of being taken from the gold
         sequence.
 
-        :param source_encoded: Encoded source: (batch_size, source_encoded_max_length, encoder_depth).
-        :param source_encoded_lengths: Lengths of encoded source sequences. Shape: (batch_size,).
         :param source_encoded_max_length: Size of encoder time dimension.
         :param target_embed: Embedded target sequence. Shape: (batch_size, target_embed_max_length, target_num_embed).
         :param target_embed_lengths: Lengths of embedded target sequences. Shape: (batch_size,).
@@ -355,9 +351,10 @@ class TransformerDecoder(Decoder):
                 choose_state_hidden = mx.sym.broadcast_mul(word_vec_prev_prediction, 1 - teacher_forcing)
                 word_vec_prev = choose_target_embed + choose_state_hidden
 
-            states = self.state_variables(seq_idx)
+            # retrieve state variables for target max length, which is decode_step plus 1
+            states = self.state_variables(seq_idx+1)
 
-            target, _, _ = self.decode_step(step=seq_idx,
+            target, _, _ = self.decode_step(step=seq_idx+1,
                                             target_embed_prev=word_vec_prev,
                                             source_encoded_max_length=source_encoded_max_length,
                                             *states)

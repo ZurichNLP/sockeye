@@ -161,6 +161,7 @@ def test_model_parameters(test_params, expected_params):
               max_updates=None,
               min_num_epochs=None,
               max_num_epochs=None,
+              num_ignored_not_improved=0,
               initial_learning_rate=0.0002,
               weight_decay=0.0,
               momentum=None,

@@ -381,7 +381,8 @@ def main():
                     mxmonitor_pattern=args.monitor_pattern,
                     mxmonitor_stat_func=args.monitor_stat_func,
                     allow_missing_parameters=args.allow_missing_params,
-                    existing_parameters=args.params)
+                    existing_parameters=args.params,
+                    num_ignored_not_improved=args.num_ignored_not_improved)
 
 
 if __name__ == "__main__":
