@@ -233,12 +233,12 @@ class TrainingModel(model.SockeyeModel):
             # fw_decoded_length = max_seq_len
             (fw_decoded,
              fw_decoded_length,
-             fw_decoded_seq_len) = self.decoder.decode_sequence(fw_encoded,
-                                                                fw_encoded_length,
-                                                                fw_encoded_seq_len,
-                                                                target_embed,
-                                                                fw_encoded_length,
-                                                                target_embed_seq_len)
+             fw_decoded_seq_len) = self.decoder.decode_sequence_with_sampling(fw_encoded,
+                                                                              fw_encoded_length,
+                                                                              fw_encoded_seq_len,
+                                                                              target_embed,
+                                                                              fw_encoded_length,
+                                                                              target_embed_seq_len)
 
             # backward encoder
             # bw_encoded: (batch_size, max_seq_len, encoder_depth)

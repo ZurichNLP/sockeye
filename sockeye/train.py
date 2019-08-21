@@ -98,7 +98,7 @@ def check_arg_compatibility(args: argparse.Namespace):
     if args.decoder == C.TRANSFORMER_TYPE:
         check_condition(args.transformer_model_size[1] == args.num_embed[1],
                         "Target embedding size must match transformer model size: %s vs. %s"
-                        % (args.transformer_model_size, args.num_embed[1]))
+                        % (args.transformer_model_size[1], args.num_embed[1]))
 
     if args.lhuc is not None:
         # Actually this check is a bit too strict
@@ -111,11 +111,16 @@ def check_arg_compatibility(args: argparse.Namespace):
         check_condition(args.decoder != C.TRANSFORMER_TYPE and args.decoder != C.CONVOLUTION_TYPE,
                         "Decoder pre-training currently supports RNN decoders only.")
     elif args.reconstruction is not None:
-        check_condition(args.decoder != C.TRANSFORMER_TYPE and args.decoder != C.CONVOLUTION_TYPE,
-                        "Reconstruction training currently supports RNN decoders only.")
-        check_condition(args.rnn_num_hidden == args.num_embed[0],
-                        "Source embedding size must match RNN decoder size for reconstruction training: %s vs. %s"
-                        % (args.rnn_num_hidden, args.num_embed[0]))
+        check_condition(args.decoder != C.CONVOLUTION_TYPE,
+                        "Reconstruction training currently supports only RNN or Transformer decoders.")
+        if args.decoder == C.TRANSFORMER_TYPE:
+            check_condition(args.transformer_model_size[1] == args.num_embed[0],
+                            "Source embedding size must match transformer model size for reconstruction training: %s vs. %s"
+                            % (args.transformer_model_size, args.num_embed[0]))
+        else:
+            check_condition(args.rnn_num_hidden == args.num_embed[0],
+                            "Source embedding size must match RNN decoder size for reconstruction training: %s vs. %s"
+                            % (args.rnn_num_hidden, args.num_embed[0]))
         if args.reconstruction == C.MONOLINGUAL:
             check_condition(args.source == args.target,
                             "Source and target side of the training data must be the same for reconstructing "
@@ -131,16 +136,16 @@ def check_arg_compatibility(args: argparse.Namespace):
     if args.teacher_forcing_probability_reduce_factor is not None:
         check_condition(args.reconstruction is None,
                         "Reducing the teacher forcing probability cannot be combined with reconstruction.")
-        check_condition(args.decoder != C.TRANSFORMER_TYPE and args.decoder != C.CONVOLUTION_TYPE,
-                        "Reducing the teacher forcing probability currently supports RNN decoders only.")
+        check_condition(args.decoder != C.CONVOLUTION_TYPE,
+                        "Reducing the teacher forcing probability currently supports only RNN or Transformer decoders.")
         check_condition(args.rnn_num_hidden == args.num_embed[1],
                         "Target embedding size must match the decoder size when reducing "
                         "the teacher forcing probability: %s vs. %s"
                         % (args.rnn_num_hidden, args.num_embed[1]))
 
     if args.instantiate_hidden is not None:
-        check_condition(args.decoder != C.TRANSFORMER_TYPE and args.decoder != C.CONVOLUTION_TYPE,
-                        "Instantiating hidden states currently supports RNN decoders only.")
+        check_condition(args.decoder != C.CONVOLUTION_TYPE,
+                        "Instantiating hidden states currently supports only RNN or Transformer decoders.")
 
 
 def check_resume(args: argparse.Namespace, output_folder: str) -> bool:

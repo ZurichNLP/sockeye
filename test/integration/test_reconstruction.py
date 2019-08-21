@@ -61,7 +61,53 @@ ENCODER_DECODER_SETTINGS = [
      " --rnn-h2h-init orthogonal_stacked"
      " --learning-rate-decay-param-reset --weight-normalization",
      "--beam-size 2",
-     False, False, False)]
+     False, False, False),
+    #
+    # Transformer reconstruction
+    # Bilingual reconstruction - "vanilla" Transformer encoder-decoder
+    ("--reconstruction bilingual --encoder transformer --decoder transformer"
+     " --num-layers 2 --transformer-attention-heads 2 --transformer-model-size 8 --num-embed 8"
+     " --transformer-feed-forward-num-hidden 16"
+     " --transformer-dropout-prepost 0.1 --transformer-preprocess n --transformer-postprocess dr"
+     " --weight-tying --weight-tying-type src_trg_softmax"
+     " --weight-init-scale=3.0 --weight-init-xavier-factor-type=avg --embed-weight-init=normal"
+     " --batch-size 2 --max-updates 2 --batch-type sentence --decode-and-evaluate 0"
+     " --checkpoint-frequency 2 --optimizer adam --initial-learning-rate 0.01",
+     "--beam-size 2",
+     True, False, False),
+    # Bilingual reconstruction - "vanilla" Transformer encoder-decoder
+    ("--reconstruction bilingual --encoder transformer --decoder transformer"
+     " --num-layers 2 --transformer-attention-heads 2 --transformer-model-size 8 --num-embed 8"
+     " --transformer-feed-forward-num-hidden 16"
+     " --transformer-dropout-prepost 0.1 --transformer-preprocess n --transformer-postprocess dr"
+     " --weight-tying --weight-tying-type src_trg_softmax"
+     " --weight-init-scale=3.0 --weight-init-xavier-factor-type=avg --embed-weight-init=normal"
+     " --batch-size 2 --max-updates 2 --batch-type sentence --decode-and-evaluate 0"
+     " --checkpoint-frequency 2 --optimizer adam --initial-learning-rate 0.01",
+     "--beam-size 2",
+     False, False, False),
+    # Bilingual reconstruction with instantiated hidden states - "vanilla" Transformer encoder-decoder
+    ("--reconstruction bilingual --instantiate-hidden gumbel-softmax --encoder transformer --decoder transformer"
+     " --num-layers 2 --transformer-attention-heads 2 --transformer-model-size 8 --num-embed 8"
+     " --transformer-feed-forward-num-hidden 16"
+     " --transformer-dropout-prepost 0.1 --transformer-preprocess n --transformer-postprocess dr"
+     " --weight-tying --weight-tying-type src_trg_softmax"
+     " --weight-init-scale=3.0 --weight-init-xavier-factor-type=avg --embed-weight-init=normal"
+     " --batch-size 2 --max-updates 2 --batch-type sentence --decode-and-evaluate 0"
+     " --checkpoint-frequency 2 --optimizer adam --initial-learning-rate 0.01",
+     "--beam-size 2",
+     True, False, False),
+    # Bilingual reconstruction with instantiated hidden states - "vanilla" Transformer encoder-decoder
+    ("--reconstruction bilingual --instantiate-hidden gumbel-softmax --encoder transformer --decoder transformer"
+     " --num-layers 2 --transformer-attention-heads 2 --transformer-model-size 8 --num-embed 8"
+     " --transformer-feed-forward-num-hidden 16"
+     " --transformer-dropout-prepost 0.1 --transformer-preprocess n --transformer-postprocess dr"
+     " --weight-tying --weight-tying-type src_trg_softmax"
+     " --weight-init-scale=3.0 --weight-init-xavier-factor-type=avg --embed-weight-init=normal"
+     " --batch-size 2 --max-updates 2 --batch-type sentence --decode-and-evaluate 0"
+     " --checkpoint-frequency 2 --optimizer adam --initial-learning-rate 0.01",
+     "--beam-size 2",
+     False, False, False),]
 
 
 @pytest.mark.parametrize("train_params, translate_params, restrict_lexicon, use_prepared_data, use_source_factors",

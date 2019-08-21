@@ -311,6 +311,8 @@ class TransformerDecoder(Decoder):
         return target, lengths, target_embed_max_length
 
     def decode_sequence_with_sampling(self,
+                                      source_encoded: mx.sym.Symbol,
+                                      source_encoded_lengths: mx.sym.Symbol,
                                       source_encoded_max_length: int,
                                       target_embed: mx.sym.Symbol,
                                       target_embed_lengths: mx.sym.Symbol,
@@ -336,6 +338,11 @@ class TransformerDecoder(Decoder):
         # initial word_vec_prev_prediction (i.e. <BOS>): (batch_size, decoder_depth)
         word_vec_prev_prediction = target_embed[0]
 
+        # initial states
+        states = self.init_states(source_encoded,
+                                  source_encoded_lengths,
+                                  source_encoded_max_length)
+
         for seq_idx in range(target_embed_max_length):
             if self.block_grad_prev_prediction:
                 word_vec_prev_prediction = mx.sym.BlockGrad(word_vec_prev_prediction)
@@ -351,13 +358,10 @@ class TransformerDecoder(Decoder):
                 choose_state_hidden = mx.sym.broadcast_mul(word_vec_prev_prediction, 1 - teacher_forcing)
                 word_vec_prev = choose_target_embed + choose_state_hidden
 
-            # retrieve state variables for target max length, which is decode_step plus 1
-            states = self.state_variables(seq_idx+1)
-
-            target, _, _ = self.decode_step(step=seq_idx+1,
-                                            target_embed_prev=word_vec_prev,
-                                            source_encoded_max_length=source_encoded_max_length,
-                                            *states)
+            target, attention_values, states = self.decode_step(seq_idx+1,
+                                                                word_vec_prev,
+                                                                source_encoded_max_length,
+                                                                *states)
 
             # get the next word_vec_prev_prediction: (batch_size, decoder_depth)
             if self.teacher_forcing_probability < 1.0:
@@ -710,6 +714,34 @@ class RecurrentDecoder(Decoder):
             if self.config.layer_normalization:
                 self.init_norms.append(layers.LayerNormalization(prefix="%senc2decinit_%d_norm" % (self.prefix,
                                                                                                    state_idx)))
+
+    def decode_sequence_with_sampling(self,
+                        source_encoded: mx.sym.Symbol,
+                        source_encoded_lengths: mx.sym.Symbol,
+                        source_encoded_max_length: int,
+                        target_embed: mx.sym.Symbol,
+                        target_embed_lengths: mx.sym.Symbol,
+                        target_embed_max_length: int) -> Tuple[mx.sym.Symbol, mx.sym.Symbol, int]:
+        """
+        Decodes a sequence of embedded target words and returns sequence of last decoder
+        representations for each time step. Potentially samples some target positions.
+
+        :param source_encoded: Encoded source: (batch_size, source_encoded_max_length, encoder_depth).
+        :param source_encoded_lengths: Lengths of encoded source sequences. Shape: (batch_size,).
+        :param source_encoded_max_length: Size of encoder time dimension.
+        :param target_embed: Embedded target sequence. Shape: (batch_size, target_embed_max_length, target_num_embed).
+        :param target_embed_lengths: Lengths of embedded target sequences. Shape: (batch_size,).
+        :param target_embed_max_length: Dimension of the embedded target sequence.
+        :return: Decoder data. Shape: (batch_size, target_embed_max_length, decoder_depth).
+        """
+
+        # for RNN decoders, both functions are identical
+        return self.decode_sequence(source_encoded,
+                               source_encoded_lengths,
+                               source_encoded_max_length,
+                               target_embed,
+                               target_embed_lengths,
+                               target_embed_max_length)
 
     def decode_sequence(self,
                         source_encoded: mx.sym.Symbol,
