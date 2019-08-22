@@ -738,14 +738,17 @@ class EarlyStoppingTrainer:
                                           target_vocab=target_vocab)
         self.state = None  # type: Optional[TrainState]
 
-    def replace_iters_update_config(self, args: argparse.Namespace):
+    def replace_iters_update_config(self, args: argparse.Namespace,
+                                    ignore_existing_data_config: bool = False):
         """
         Resample sentencepiece segmentation, then replace train and validation iterators. Also
         updates the model config to update data statistics as a running average.
 
         :param args:
+        :param ignore_existing_data_config: Ignore config_data of existing model config
         :return:
         """
+        logger.info("Resampling sentencepiece segmentation at the start of epoch: %d" % self.state.epoch)
 
         output_folder = self.model.output_dir
 
@@ -816,10 +819,13 @@ class EarlyStoppingTrainer:
             bucketing=not args.no_bucketing,
             bucket_width=args.bucket_width)
 
-        # update config_data part of self.model.config
-        averaged_config_data = data_io.update_config_data(old_config=self.model.config.config_data,
-                                                          new_config=new_config_data,
-                                                          epoch=self.state.epoch+1)
+        if ignore_existing_data_config:
+            averaged_config_data = new_config_data
+        else:
+            # update config_data part of self.model.config
+            averaged_config_data = data_io.update_config_data(old_config=self.model.config.config_data,
+                                                              new_config=new_config_data,
+                                                              epoch=self.state.epoch+1)
 
         new_config = self.model.config.copy(config_data=averaged_config_data)
         self.model.config = new_config
@@ -920,6 +926,10 @@ class EarlyStoppingTrainer:
         tic = time.time()
 
         self.next_validation_iter = None
+
+        if args.sentencepiece:
+            # ignore iters given as arguments, ignore existing data config since statistics are without segmentation
+            train_iter, validation_iter = self.replace_iters_update_config(args=args, ignore_existing_data_config=True)
 
         next_data_batch = train_iter.next()
         while True:

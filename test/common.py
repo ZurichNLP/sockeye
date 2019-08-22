@@ -16,6 +16,7 @@ import logging
 import os
 import random
 import sys
+import sentencepiece
 from contextlib import contextmanager
 from tempfile import TemporaryDirectory
 from typing import List, Optional, Tuple
@@ -153,7 +154,8 @@ def tmp_digits_dataset(prefix: str,
                        sort_target: bool = False,
                        seed_train: int = 13, seed_dev: int = 13,
                        with_source_factors: bool = False,
-                       with_target_constraints: bool = False):
+                       with_target_constraints: bool = False,
+                       with_sentencepiece_model: bool = False):
     with TemporaryDirectory(prefix=prefix) as work_dir:
         # Simple digits files for train/dev data
         train_source_path = os.path.join(work_dir, "train.src")
@@ -186,6 +188,34 @@ def tmp_digits_dataset(prefix: str,
             data['train_source_factors'] = [train_factor_path]
             data['dev_source_factors'] = [dev_factor_path]
             data['test_source_factors'] = [test_factor_path]
+
+        if with_sentencepiece_model:
+
+            # assuming standard Sockeye vocab files
+            PAD_ID = 0
+            UNK_ID = 1
+            BOS_ID = 2
+            EOS_ID = 3
+
+            sentencepiece_model_path = os.path.join(work_dir, "sentencepiece")
+
+            train_args = ["--model_prefix=%s" % sentencepiece_model_path,
+                          "--input=%s" % train_source_path,
+                          "--vocab_size=%d" % 20,
+                          "--character_coverage=1.0",
+                          "--model_type=unigram",
+                          "--pad_id=%d" % PAD_ID,
+                          "--unk_id=%d" % UNK_ID,
+                          "--bos_id=%d" % BOS_ID,
+                          "--eos_id=%d" % EOS_ID]
+
+            traing_args_str = " ".join(train_args)
+
+            sentencepiece.SentencePieceTrainer.Train(traing_args_str)
+
+            sentencepiece_model_path += ".model"
+
+            data['sentencepiece_model_path'] = sentencepiece_model_path
 
         if with_target_constraints:
             # When using constrained decoding, rewrite the source file. Generating a mixture of
