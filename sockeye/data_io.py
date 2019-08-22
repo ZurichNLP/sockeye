@@ -14,6 +14,7 @@
 """
 Implements data iterators and I/O related functions for sequence-to-sequence models.
 """
+import sentencepiece
 import bisect
 import logging
 import math
@@ -31,7 +32,7 @@ import numpy as np
 from . import config
 from . import constants as C
 from . import vocab
-from .utils import check_condition, smart_open, get_tokens, OnlineMeanAndVariance
+from .utils import check_condition, smart_open, get_tokens, OnlineMeanAndVariance, update_average
 
 logger = logging.getLogger(__name__)
 
@@ -854,6 +855,68 @@ def get_training_data_iters(sources: List[str],
     return train_iter, validation_iter, config_data, data_info
 
 
+def resample_sentencepiece(old_source: str,
+                           sentencepiece_processor: sentencepiece.SentencePieceProcessor,
+                           output_folder: str,
+                           epoch: int,
+                           nbest_size: int,
+                           alpha: float
+                           ):
+    path, file_name = os.path.split(old_source)
+    file_name += ".%d" % epoch
+
+    new_source = os.path.join(output_folder, file_name)
+    new_source = os.path.abspath(new_source)
+
+    with open(old_source, "r") as old_source_handle, open(new_source, "w") as new_source_handle:
+        for line in old_source_handle:
+            line = line.strip()
+            pieces = sentencepiece_processor.SampleEncodeAsPieces(input=line, nbest_size=nbest_size, alpha=alpha)
+            pieces_line = " ".join(pieces)
+            new_source_handle.write(pieces_line)
+            new_source_handle.write("\n")
+
+    return new_source
+
+
+def resample_sentencepiece_parallel(sources: List[str],
+                           target: str,
+                           sentencepiece_model: str,
+                           output_folder: str,
+                           epoch: int,
+                           nbest_size: int,
+                           alpha: float) -> Tuple[List[str], str]:
+    """
+
+    :param sources:
+    :param target:
+    :return:
+    """
+
+    # do not change factor files at all
+    old_source = sources[0]
+
+    sentencepiece_processor = sentencepiece.SentencePieceProcessor()
+    sentencepiece_processor.Load(sentencepiece_model)
+
+    new_source = resample_sentencepiece(old_source=old_source,
+                                        sentencepiece_processor=sentencepiece_processor,
+                                        output_folder=output_folder,
+                                        epoch=epoch,
+                                        nbest_size=nbest_size,
+                                        alpha=alpha)
+    new_target = resample_sentencepiece(old_source=target,
+                                        sentencepiece_processor=sentencepiece_processor,
+                                        output_folder=output_folder,
+                                        epoch=epoch,
+                                        nbest_size=nbest_size,
+                                        alpha=alpha)
+
+    sources[0] = new_source
+
+    return sources, new_target
+
+
 class LengthStatistics(config.Config):
 
     def __init__(self,
@@ -968,6 +1031,34 @@ class DataConfig(config.Config):
         self.max_seq_len_target = max_seq_len_target
         self.num_source_factors = num_source_factors
         self.source_with_eos = source_with_eos
+
+
+def update_config_data(old_config: DataConfig, new_config: DataConfig, epoch: int) -> DataConfig:
+    """
+
+    :param old_config:
+    :param new_config:
+    :return:
+    """
+    old_statistics = old_config.data_statistics
+    new_statistics = new_config.data_statistics
+
+    new_length_ratio_mean = update_average(old_average=old_statistics.length_ratio_mean,
+                                           average_size=epoch,
+                                           new_value=new_statistics.length_ratio_mean)
+
+    new_length_ratio_std = update_average(old_average=old_statistics.length_ratio_std,
+                                           average_size=epoch,
+                                           new_value=new_statistics.length_ratio_std)
+
+    updated_data_statistics = new_config.copy(length_ratio_mean=new_length_ratio_mean,
+                                              length_ratio_std=new_length_ratio_std)
+
+    return DataConfig(data_statistics=updated_data_statistics,
+                      max_seq_len_source=old_config.max_seq_len_source,
+                      max_seq_len_target=old_config.max_seq_len_target,
+                      num_source_factors=old_config.num_source_factors,
+                      source_with_eos=old_config.source_with_eos)
 
 
 def read_content(path: str, limit: Optional[int] = None) -> Iterator[List[str]]:

@@ -1078,6 +1078,25 @@ def add_training_args(params):
                               help="Do not perform any actual training, but print statistics about the model"
                               " and mode of operation.")
 
+    train_params.add_argument('--sentencepiece',
+                              action='store_true',
+                              help="Resample piece segmentation for each epoch in training.")
+
+    train_params.add_argument('--sentencepiece-alpha',
+                              default=0.1,
+                              type=float,
+                              help='Alpha parameter for sentencepiece sampling.')
+
+    train_params.add_argument('--sentencepiece-nbest',
+                              default=64,
+                              type=int,
+                              help='Size of nbest list for sentencepiece sampling.')
+
+    train_params.add_argument('--sentencepiece-model',
+                              default=0.1,
+                              type=regular_file(),
+                              help='Path to model with trained sentencepiece model.')
+
 
 def add_train_cli_args(params):
     add_training_io_args(params)

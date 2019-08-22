@@ -911,3 +911,16 @@ def gumbel_softmax(logits: mx.sym.Symbol,
         st_gs = mx.sym.broadcast_sub(gs, mx.sym.max(gs, axis=axis, keepdims=True)) == 0.0
         return mx.sym.BlockGrad(st_gs - gs) + gs
     return gs
+
+def update_average(old_average: float, average_size: int, new_value: float) -> float:
+    """
+    Updates old_average with a new value, implicitly updating a dynamic mean of
+    past averages.
+
+    :param old_average: Previous average.
+    :param average_size: Number of values that contribute to the new average.
+    :param new_value: Value to add to the average.
+    :return:
+    """
+
+    return (average_size * old_average + new_value) / (average_size + 1)

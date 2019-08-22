@@ -15,6 +15,7 @@
 Code for training
 """
 import logging
+import argparse
 import multiprocessing as mp
 import os
 import pickle
@@ -22,7 +23,7 @@ import random
 import shutil
 import time
 from functools import reduce
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple, Union, cast
 
 import mxnet as mx
 import numpy as np
@@ -34,10 +35,12 @@ from . import data_io
 from . import decoder
 from . import layers
 from . import loss
+from .config import Config
 from . import lr_scheduler
 from . import model
 from . import utils
 from . import vocab
+from .train import use_shared_vocab
 from .optimizers import BatchState, CheckpointState, SockeyeOptimizer, OptimizerConfig
 
 logger = logging.getLogger(__name__)
@@ -736,7 +739,89 @@ class EarlyStoppingTrainer:
                                           target_vocab=target_vocab)
         self.state = None  # type: Optional[TrainState]
 
+    def replace_iters_update_config(self, args: argparse.Namespace):
+        """
+        Resample sentencepiece segmentation, then replace train and validation iterators. Also
+        updates the model config to update data statistics as a running average.
+
+        :param args:
+        :return:
+        """
+
+        output_folder = self.model.output_dir
+
+        sources = [args.source] + args.source_factors
+        sources = [str(os.path.abspath(source)) for source in sources]
+        target = os.path.abspath(args.target)
+
+        validation_sources = [args.validation_source] + args.validation_source_factors
+        validation_sources = [str(os.path.abspath(source)) for source in validation_sources]
+        validation_target = os.path.abspath(args.validation_target)
+
+        sources, target = data_io.resample_sentencepiece_parallel(sources=sources,
+                                                                  target=target,
+                                                                  sentencepiece_model=args.sentencepiece_model,
+                                                                  output_folder=output_folder,
+                                                                  epoch=self.state.epoch,
+                                                                  nbest_size=args.sentencepiece_nbest,
+                                                                  alpha=args.sentencepiece_alpha)
+        validation_sources, validation_target = data_io.resample_sentencepiece_parallel(sources=validation_sources,
+                                                                                        target=validation_target,
+                                                                                        sentencepiece_model=args.sentencepiece_model,
+                                                                                        output_folder=output_folder,
+                                                                                        epoch=self.state.epoch,
+                                                                                        nbest_size=args.sentencepiece_nbest,
+                                                                                        alpha=args.sentencepiece_alpha)
+
+        # Load the existing vocabs created when starting the training run.
+        source_vocabs = vocab.load_source_vocabs(output_folder)
+        target_vocab = vocab.load_target_vocab(output_folder)
+
+        # Recover the vocabulary path from the data info file:
+        data_info = cast(data_io.DataInfo, Config.load(os.path.join(output_folder, C.DATA_INFO)))
+        source_vocab_paths = data_info.source_vocabs
+        target_vocab_path = data_info.target_vocab
+
+        batch_num_devices = 1 if args.use_cpu else sum(-di if di < 0 else 1 for di in args.device_ids)
+        batch_by_words = args.batch_type == C.BATCH_TYPE_WORD
+
+        max_seq_len_source, max_seq_len_target = args.max_seq_len
+        # The maximum length is the length before we add the BOS/EOS symbols
+        max_seq_len_source = max_seq_len_source + C.SPACE_FOR_XOS
+        max_seq_len_target = max_seq_len_target + C.SPACE_FOR_XOS
+
+        train_iter, validation_iter, new_config_data, data_info = data_io.get_training_data_iters(sources=sources,
+            target=target,
+            validation_sources=validation_sources,
+            validation_target=validation_target,
+            source_vocabs=source_vocabs,
+            target_vocab=target_vocab,
+            source_vocab_paths=source_vocab_paths,
+            target_vocab_path=target_vocab_path,
+            shared_vocab=use_shared_vocab(args),
+            batch_size=args.batch_size,
+            batch_by_words=batch_by_words,
+            batch_num_devices=batch_num_devices,
+            fill_up=args.fill_up,
+            max_seq_len_source=max_seq_len_source,
+            max_seq_len_target=max_seq_len_target,
+            bucketing=not args.no_bucketing,
+            bucket_width=args.bucket_width)
+
+        # update config_data part of self.model.config
+        averaged_config_data = data_io.update_config_data(old_config=self.model.config.config_data,
+                                                          new_config=new_config_data,
+                                                          epoch=self.state.epoch)
+
+        new_config = self.model.config.copy(config_data=averaged_config_data)
+        self.model.config = new_config
+        self.model.config.freeze()
+        self.model.save_config(output_folder)
+
+        return train_iter, validation_iter
+
     def fit(self,
+            args: argparse.Namespace,
             train_iter: data_io.BaseParallelSampleIter,
             validation_iter: data_io.BaseParallelSampleIter,
             early_stopping_metric,
@@ -826,12 +911,17 @@ class EarlyStoppingTrainer:
         speedometer = Speedometer(frequency=C.MEASURE_SPEED_EVERY, auto_reset=False)
         tic = time.time()
 
+        self.next_validation_iter = None
+
         next_data_batch = train_iter.next()
         while True:
 
             if not train_iter.iter_next():
                 self.state.epoch += 1
-                train_iter.reset()
+                if args.sentencepiece:
+                    train_iter, self.next_validation_iter = self.replace_iters_update_config(args)
+                else:
+                    train_iter.reset()
                 if max_epochs is not None and self.state.epoch == max_epochs:
                     logger.info("Maximum # of epochs (%s) reached.", max_epochs)
                     break
@@ -1024,6 +1114,9 @@ class EarlyStoppingTrainer:
         """
         Evaluates the model on the validation data and updates the validation metric(s).
         """
+        if self.next_validation_iter is not None:
+            val_iter = self.next_validation_iter
+            self.next_validation_iter = None
         val_iter.reset()
         val_metric.reset()
         self.model.evaluate(val_iter, val_metric)

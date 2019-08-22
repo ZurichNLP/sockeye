@@ -948,7 +948,8 @@ def train(args: argparse.Namespace):
                                                 source_vocabs=source_vocabs,
                                                 target_vocab=target_vocab)
 
-        trainer.fit(train_iter=train_iter,
+        trainer.fit(args=args,
+                    train_iter=train_iter,
                     validation_iter=eval_iter,
                     early_stopping_metric=args.optimized_metric,
                     metrics=args.metrics,
