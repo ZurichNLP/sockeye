@@ -1097,6 +1097,12 @@ def add_training_args(params):
                               type=regular_file(),
                               help='Path to model with trained sentencepiece model.')
 
+    train_params.add_argument('--sentencepiece-protected',
+                              default=[],
+                              nargs="+",
+                              type=str,
+                              help='Tokens in vocabulary that must not be segmented by sentencepiece model.')
+
 
 def add_train_cli_args(params):
     add_training_io_args(params)

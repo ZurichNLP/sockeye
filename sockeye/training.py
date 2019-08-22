@@ -766,14 +766,16 @@ class EarlyStoppingTrainer:
                                                                   output_folder=output_folder,
                                                                   epoch=self.state.epoch,
                                                                   nbest_size=args.sentencepiece_nbest,
-                                                                  alpha=args.sentencepiece_alpha)
+                                                                  alpha=args.sentencepiece_alpha,
+                                                                  protected_tokens=args.sentencepiece_protected)
         validation_sources, validation_target = data_io.resample_sentencepiece_parallel(sources=validation_sources,
                                                                                         target=validation_target,
                                                                                         sentencepiece_model=args.sentencepiece_model,
                                                                                         output_folder=output_folder,
                                                                                         epoch=self.state.epoch,
                                                                                         nbest_size=args.sentencepiece_nbest,
-                                                                                        alpha=args.sentencepiece_alpha)
+                                                                                        alpha=args.sentencepiece_alpha,
+                                                                                        protected_tokens=args.sentencepiece_protected)
 
         # Load the existing vocabs created when starting the training run.
         source_vocabs = vocab.load_source_vocabs(output_folder)

@@ -198,7 +198,8 @@ def test_model_parameters(test_params, expected_params):
               sentencepiece=False,
               sentencepiece_alpha=0.1,
               sentencepiece_nbest=64,
-              sentencepiece_model=None)),
+              sentencepiece_model=None,
+              sentencepiece_protected=[])),
 ])
 def test_training_arg(test_params, expected_params):
     _test_args(test_params, expected_params, arguments.add_training_args)

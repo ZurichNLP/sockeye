@@ -860,8 +860,19 @@ def resample_sentencepiece(old_source: str,
                            output_folder: str,
                            epoch: int,
                            nbest_size: int,
-                           alpha: float
-                           ):
+                           alpha: float,
+                           protected_tokens: List[str]) -> str:
+    """
+
+    :param old_source:
+    :param sentencepiece_processor:
+    :param output_folder:
+    :param epoch:
+    :param nbest_size:
+    :param alpha:
+    :param protected_tokens:
+    :return:
+    """
     path, file_name = os.path.split(old_source)
     file_name += ".%d" % epoch
 
@@ -871,7 +882,19 @@ def resample_sentencepiece(old_source: str,
     with open(old_source, "r") as old_source_handle, open(new_source, "w") as new_source_handle:
         for line in old_source_handle:
             line = line.strip()
+
+            protect = None
+            # check for protected tokens at the beginning of the line
+            tokens = line.split(" ")
+            if tokens[0] in protected_tokens:
+                protect = tokens.pop(0)
+            line = " ".join(tokens)
+
             pieces = sentencepiece_processor.SampleEncodeAsPieces(input=line, nbest_size=nbest_size, alpha=alpha)
+
+            if protect is not None:
+                pieces = [protect] + pieces
+
             pieces_line = " ".join(pieces)
             new_source_handle.write(pieces_line)
             new_source_handle.write("\n")
@@ -880,16 +903,23 @@ def resample_sentencepiece(old_source: str,
 
 
 def resample_sentencepiece_parallel(sources: List[str],
-                           target: str,
-                           sentencepiece_model: str,
-                           output_folder: str,
-                           epoch: int,
-                           nbest_size: int,
-                           alpha: float) -> Tuple[List[str], str]:
+                                    target: str,
+                                    sentencepiece_model: str,
+                                    output_folder: str,
+                                    epoch: int,
+                                    nbest_size: int,
+                                    alpha: float,
+                                    protected_tokens: List[str]) -> Tuple[List[str], str]:
     """
 
     :param sources:
     :param target:
+    :param sentencepiece_model:
+    :param output_folder:
+    :param epoch:
+    :param nbest_size:
+    :param alpha:
+    :param protected_tokens:
     :return:
     """
 
@@ -904,13 +934,15 @@ def resample_sentencepiece_parallel(sources: List[str],
                                         output_folder=output_folder,
                                         epoch=epoch,
                                         nbest_size=nbest_size,
-                                        alpha=alpha)
+                                        alpha=alpha,
+                                        protected_tokens=protected_tokens)
     new_target = resample_sentencepiece(old_source=target,
                                         sentencepiece_processor=sentencepiece_processor,
                                         output_folder=output_folder,
                                         epoch=epoch,
                                         nbest_size=nbest_size,
-                                        alpha=alpha)
+                                        alpha=alpha,
+                                        protected_tokens=protected_tokens)
 
     sources[0] = new_source
 
