@@ -1093,7 +1093,7 @@ def add_training_args(params):
                               help='Size of nbest list for sentencepiece sampling.')
 
     train_params.add_argument('--sentencepiece-model',
-                              default=0.1,
+                              default=None,
                               type=regular_file(),
                               help='Path to model with trained sentencepiece model.')
 

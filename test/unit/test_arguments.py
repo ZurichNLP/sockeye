@@ -194,7 +194,11 @@ def test_model_parameters(test_params, expected_params):
               seed=13,
               keep_last_params=-1,
               rnn_enc_last_hidden_concat_to_embedding=False,
-              dry_run=False)),
+              dry_run=False,
+              sentencepiece=False,
+              sentencepiece_alpha=0.1,
+              sentencepiece_nbest=64,
+              sentencepiece_model=None)),
 ])
 def test_training_arg(test_params, expected_params):
     _test_args(test_params, expected_params, arguments.add_training_args)

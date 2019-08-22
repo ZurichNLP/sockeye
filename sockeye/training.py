@@ -40,7 +40,6 @@ from . import lr_scheduler
 from . import model
 from . import utils
 from . import vocab
-from .train import use_shared_vocab
 from .optimizers import BatchState, CheckpointState, SockeyeOptimizer, OptimizerConfig
 
 logger = logging.getLogger(__name__)
@@ -790,6 +789,15 @@ class EarlyStoppingTrainer:
         max_seq_len_source = max_seq_len_source + C.SPACE_FOR_XOS
         max_seq_len_target = max_seq_len_target + C.SPACE_FOR_XOS
 
+        weight_tying = args.weight_tying
+        weight_tying_type = args.weight_tying_type
+        shared_vocab = args.shared_vocab
+        decoder_only = args.decoder_only
+        if weight_tying and C.WEIGHT_TYING_SRC in weight_tying_type and C.WEIGHT_TYING_TRG in weight_tying_type:
+            shared_vocab = True
+        if decoder_only:
+            shared_vocab = True
+
         train_iter, validation_iter, new_config_data, data_info = data_io.get_training_data_iters(sources=sources,
             target=target,
             validation_sources=validation_sources,
@@ -798,7 +806,7 @@ class EarlyStoppingTrainer:
             target_vocab=target_vocab,
             source_vocab_paths=source_vocab_paths,
             target_vocab_path=target_vocab_path,
-            shared_vocab=use_shared_vocab(args),
+            shared_vocab=shared_vocab,
             batch_size=args.batch_size,
             batch_by_words=batch_by_words,
             batch_num_devices=batch_num_devices,
@@ -811,7 +819,7 @@ class EarlyStoppingTrainer:
         # update config_data part of self.model.config
         averaged_config_data = data_io.update_config_data(old_config=self.model.config.config_data,
                                                           new_config=new_config_data,
-                                                          epoch=self.state.epoch)
+                                                          epoch=self.state.epoch+1)
 
         new_config = self.model.config.copy(config_data=averaged_config_data)
         self.model.config = new_config
