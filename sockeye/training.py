@@ -768,14 +768,6 @@ class EarlyStoppingTrainer:
                                                                   nbest_size=args.sentencepiece_nbest,
                                                                   alpha=args.sentencepiece_alpha,
                                                                   protected_tokens=args.sentencepiece_protected)
-        validation_sources, validation_target = data_io.resample_sentencepiece_parallel(sources=validation_sources,
-                                                                                        target=validation_target,
-                                                                                        sentencepiece_model=args.sentencepiece_model,
-                                                                                        output_folder=output_folder,
-                                                                                        epoch=self.state.epoch,
-                                                                                        nbest_size=args.sentencepiece_nbest,
-                                                                                        alpha=args.sentencepiece_alpha,
-                                                                                        protected_tokens=args.sentencepiece_protected)
 
         # Load the existing vocabs created when starting the training run.
         source_vocabs = vocab.load_source_vocabs(output_folder)
@@ -834,7 +826,7 @@ class EarlyStoppingTrainer:
         self.model.config.freeze()
         self.model.save_config(output_folder)
 
-        return train_iter, validation_iter
+        return train_iter
 
     def fit(self,
             args: argparse.Namespace,
@@ -927,11 +919,9 @@ class EarlyStoppingTrainer:
         speedometer = Speedometer(frequency=C.MEASURE_SPEED_EVERY, auto_reset=False)
         tic = time.time()
 
-        self.next_validation_iter = None
-
         if args.sentencepiece:
             # ignore iters given as arguments, ignore existing data config since statistics are without segmentation
-            train_iter, validation_iter = self.replace_iters_update_config(args=args, ignore_existing_data_config=True)
+            train_iter = self.replace_iters_update_config(args=args, ignore_existing_data_config=True)
 
         next_data_batch = train_iter.next()
         while True:
@@ -939,7 +929,7 @@ class EarlyStoppingTrainer:
             if not train_iter.iter_next():
                 self.state.epoch += 1
                 if args.sentencepiece:
-                    train_iter, self.next_validation_iter = self.replace_iters_update_config(args)
+                    train_iter = self.replace_iters_update_config(args)
                 else:
                     train_iter.reset()
                 if max_epochs is not None and self.state.epoch == max_epochs:
@@ -1134,9 +1124,6 @@ class EarlyStoppingTrainer:
         """
         Evaluates the model on the validation data and updates the validation metric(s).
         """
-        if self.next_validation_iter is not None:
-            val_iter = self.next_validation_iter
-            self.next_validation_iter = None
         val_iter.reset()
         val_metric.reset()
         self.model.evaluate(val_iter, val_metric)
