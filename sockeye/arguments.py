@@ -753,6 +753,10 @@ def add_model_parameters(params):
 def add_training_args(params):
     train_params = params.add_argument_group("Training parameters")
 
+    train_params.add_argument('--update-interval',
+                              type=int,
+                              default=1,
+                              help="Number of batch gradients to accumulate before updating. Default: %(default)s.")
     train_params.add_argument('--decoder-only',
                                action='store_true',
                                help='Pre-train a decoder. This is currently for RNN decoders only. '

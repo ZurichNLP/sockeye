@@ -159,6 +159,7 @@ def test_model_parameters(test_params, expected_params):
               max_samples=None,
               min_updates=None,
               max_updates=None,
+              update_interval=1,
               min_num_epochs=None,
               max_num_epochs=None,
               num_ignored_not_improved=0,
