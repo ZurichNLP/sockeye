@@ -172,6 +172,13 @@ def check_resume(args: argparse.Namespace, output_folder: str) -> bool:
             # allow different device-ids provided their total count is the same
             if 'device_ids' in arg_diffs and len(old_args['device_ids']) == len(vars(args)['device_ids']):
                 arg_diffs.discard('device_ids')
+            # allow different batch size and update interval provided the effective batch size is the same
+            if 'batch_size' in arg_diffs and 'update_interval' in arg_diffs:
+                old_effective_batch_size = old_args['batch_size'] * old_args['update_interval']
+                new_effective_batch_size = args.batch_size * args.update_interval
+                if old_effective_batch_size == new_effective_batch_size:
+                    arg_diffs.discard('batch_size')
+                    arg_diffs.discard('update_interval')
             if not arg_diffs:
                 resume_training = True
             else:
