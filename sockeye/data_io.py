@@ -858,25 +858,25 @@ def get_training_data_iters(sources: List[str],
 def resample_sentencepiece(old_source: str,
                            sentencepiece_processor: sentencepiece.SentencePieceProcessor,
                            output_folder: str,
-                           epoch: int,
                            nbest_size: int,
                            alpha: float,
-                           protected_tokens: List[str]) -> str:
+                           protected_tokens: List[str],
+                           is_target: bool) -> str:
     """
-
-    :param old_source:
-    :param sentencepiece_processor:
-    :param output_folder:
-    :param epoch:
-    :param nbest_size:
-    :param alpha:
-    :param protected_tokens:
+    
+    :param old_source: 
+    :param sentencepiece_processor: 
+    :param output_folder: 
+    :param nbest_size: 
+    :param alpha: 
+    :param protected_tokens: 
+    :param is_target: 
     :return:
     """
-    path, file_name = os.path.split(old_source)
-    file_name += ".%d" % epoch
+    lang_suffix = "trg" if is_target else "src.0"
+    new_name = "train.pieces." + lang_suffix
 
-    new_source = os.path.join(output_folder, file_name)
+    new_source = os.path.join(output_folder, new_name)
     new_source = os.path.abspath(new_source)
 
     with open(old_source, "r") as old_source_handle, open(new_source, "w") as new_source_handle:
@@ -888,7 +888,7 @@ def resample_sentencepiece(old_source: str,
             tokens = line.split(" ")
             if tokens[0] in protected_tokens:
                 protect = tokens.pop(0)
-            line = " ".join(tokens)
+                line = " ".join(tokens)
 
             pieces = sentencepiece_processor.SampleEncodeAsPieces(input=line, nbest_size=nbest_size, alpha=alpha)
 
@@ -906,7 +906,6 @@ def resample_sentencepiece_parallel(sources: List[str],
                                     target: str,
                                     sentencepiece_model: str,
                                     output_folder: str,
-                                    epoch: int,
                                     nbest_size: int,
                                     alpha: float,
                                     protected_tokens: List[str]) -> Tuple[List[str], str]:
@@ -916,7 +915,6 @@ def resample_sentencepiece_parallel(sources: List[str],
     :param target:
     :param sentencepiece_model:
     :param output_folder:
-    :param epoch:
     :param nbest_size:
     :param alpha:
     :param protected_tokens:
@@ -932,17 +930,17 @@ def resample_sentencepiece_parallel(sources: List[str],
     new_source = resample_sentencepiece(old_source=old_source,
                                         sentencepiece_processor=sentencepiece_processor,
                                         output_folder=output_folder,
-                                        epoch=epoch,
                                         nbest_size=nbest_size,
                                         alpha=alpha,
-                                        protected_tokens=protected_tokens)
+                                        protected_tokens=protected_tokens,
+                                        is_target=False)
     new_target = resample_sentencepiece(old_source=target,
                                         sentencepiece_processor=sentencepiece_processor,
                                         output_folder=output_folder,
-                                        epoch=epoch,
                                         nbest_size=nbest_size,
                                         alpha=alpha,
-                                        protected_tokens=protected_tokens)
+                                        protected_tokens=protected_tokens,
+                                        is_target=True)
 
     sources[0] = new_source
 
@@ -1083,7 +1081,7 @@ def update_config_data(old_config: DataConfig, new_config: DataConfig, epoch: in
                                            average_size=epoch,
                                            new_value=new_statistics.length_ratio_std)
 
-    updated_data_statistics = new_config.copy(length_ratio_mean=new_length_ratio_mean,
+    updated_data_statistics = new_statistics.copy(length_ratio_mean=new_length_ratio_mean,
                                               length_ratio_std=new_length_ratio_std)
 
     return DataConfig(data_statistics=updated_data_statistics,

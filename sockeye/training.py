@@ -775,7 +775,6 @@ class EarlyStoppingTrainer:
                                                                   target=target,
                                                                   sentencepiece_model=args.sentencepiece_model,
                                                                   output_folder=output_folder,
-                                                                  epoch=self.state.epoch,
                                                                   nbest_size=args.sentencepiece_nbest,
                                                                   alpha=args.sentencepiece_alpha,
                                                                   protected_tokens=args.sentencepiece_protected)
