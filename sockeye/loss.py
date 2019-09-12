@@ -57,6 +57,8 @@ def get_loss(loss_config: LossConfig) -> 'Loss':
     """
     if loss_config.name == C.CROSS_ENTROPY:
         return CrossEntropyLoss(loss_config)
+    elif loss_config.name == C.COSINE_DIST:
+        return CosineDistance(loss_config)
     else:
         raise ValueError("unknown loss name: %s" % loss_config.name)
 
@@ -190,3 +192,86 @@ class CrossEntropyMetric(EvalMetric):
                 self.num_inst += batch_size
 
             self.sum_metric += ce.asscalar()
+
+class CosineDistance(Loss):
+    """
+    Computes the cosine distance between two encoded sequences.
+
+    :param loss_config: Loss configuration.
+    """
+
+    def __init__(self, loss_config: LossConfig) -> None:
+        logger.info("Loss: CosineDistance")
+        self.loss_config = loss_config
+    
+    def get_loss(self, encoded_sequence1: mx.sym.Symbol, encoded_sequence2: mx.sym.Symbol) -> List[mx.sym.Symbol]:
+        return [
+                mx.sym.MakeLoss(self.symbol_cosine_distance_avg(encoded_sequence1, encoded_sequence2))]
+    
+    def create_metric(self) -> "CosineDistanceMetric":
+        return CosineDistanceMetric(self.loss_config)
+    
+    #TODO: mask padded ids?
+    def symbol_cosine_distance_avg(self, seq1, seq2):
+         # seq1, seq2: shape(batch_size,seq_length,dimension)
+        # -> shape(batch_size, dimension)
+        avg1 = mx.sym.mean(seq1,axis=1)
+        avg2 = mx.sym.mean(seq2,axis=1)
+        expanded1 = mx.sym.expand_dims(avg1, axis=1)  # expanded1: (batch_size, 1, dimension)
+        expanded2 = mx.sym.expand_dims(avg2, axis=2) # expanded2: (batch_size, dimension, 1)
+        dot_prod = mx.sym.batch_dot(expanded1, expanded2) # dot_prod: (batch_size,1,1) 
+        dot_prod = mx.sym.squeeze(dot_prod) # -> (batch_size)
+        norm1 = mx.sym.sqrt(mx.sym.sum((avg1 * avg1), axis=1))
+        norm2 = mx.sym.sqrt(mx.sym.sum((avg2 * avg2), axis=1))
+        similarity = dot_prod / (norm1 * norm2)
+        distance = 1.0 - similarity # mx.sym.Symbol, shape(batch_size,)
+        return distance
+    
+    # TODO: pooling instead of average
+    #def symbol_cosine_distance_pool(self, seq1, seq2):
+        
+
+
+class CosineDistanceMetric(EvalMetric):
+    """
+    Calculate the cosine distance between two encoded sequences.
+
+    :param loss_config: The configuration used for the corresponding loss.
+    :param name: Name of this metric instance for display.
+    :param output_names: Name of predictions that should be used when updating with update_dict.
+    :param label_names: Name of labels that should be used when updating with update_dict.
+    """
+    def __init__(self,
+                 loss_config: LossConfig,
+                 name: str = C.COSINE_DIST,
+                 output_names: Optional[List[str]] = None,
+                 label_names: Optional[List[str]] = None) -> None:
+        super().__init__(name, output_names=output_names, label_names=label_names)
+        self.loss_config = loss_config
+
+    @staticmethod
+    def cosine_distance_avg(seq1, seq2):
+        # seq1, seq2: shape(batch_size,seq_length,dimension)
+        # -> shape(batch_size, dimension)
+        avg1 = mx.nd.mean(seq1,axis=1)
+        avg2 = mx.nd.mean(seq2,axis=1)
+        expanded1 = mx.nd.expand_dims(avg1, axis=1)  # expanded1: (batch_size, 1, dimension)
+        expanded2 = mx.nd.expand_dims(avg2, axis=2) # expanded2: (batch_size, dimension, 1)
+        dot_prod = mx.nd.batch_dot(expanded1, expanded2)#[:,0,0] # dot_prod: (batch_size,1,1) 
+        dot_prod = mx.nd.squeeze(dot_prod) # -> (batch_size)
+        norm1 = mx.nd.sqrt(mx.sym.sum((avg1 * avg1), axis=1))
+        norm2 = mx.nd.sqrt(mx.sym.sum((avg2 * avg2), axis=1))
+        similarity = dot_prod / (norm1 * norm2)
+        distance = 1.0 - similarity # mx.sym.Symbol, shape(batch_size,)
+        return distance
+    
+
+
+
+    def update(self, distances):
+        for distance in distances:
+            batch_size = len(distances)
+            distance = mx.nd.sum(distance)
+            self.num_inst += batch_size
+            self.sum_metric += distance.asscalar()
+

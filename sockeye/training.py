@@ -436,6 +436,165 @@ class TrainingModel(model.SockeyeModel):
     def monitor(self) -> Optional[mx.monitor.Monitor]:
         return self._monitor
 
+class CosineEncoderModel(TrainingModel):
+    """
+    CosineEncoderModel is a SockeyeModel that uses an additional encoder to produce an encoded target sequence, the cosine distance between encoded source and target will be used in loss.
+
+    :param config: Configuration object holding details about the model.
+    :param context: The context(s) that MXNet will be run in (GPU(s)/CPU).
+    :param output_dir: Directory where this model is stored.
+    :param provide_data: List of input data descriptions.
+    :param provide_label: List of label descriptions.
+    :param default_bucket_key: Default bucket key.
+    :param bucketing: If True bucketing will be used, if False the computation graph will always be
+            unrolled to the full length.
+    :param gradient_compression_params: Optional dictionary of gradient compression parameters.
+    :param fixed_param_names: Optional list of params to fix during training (i.e. their values will not be trained).
+    :param fixed_param_strategy: Optional string indicating a named strategy for fixing parameters.
+    """
+
+    def __init__(self,
+                 config: model.ModelConfig,
+                 context: List[mx.context.Context],
+                 output_dir: str,
+                 provide_data: List[mx.io.DataDesc],
+                 provide_label: List[mx.io.DataDesc],
+                 default_bucket_key: Tuple[int, int],
+                 bucketing: bool,
+                 gradient_compression_params: Optional[Dict[str, Any]] = None,
+                 fixed_param_names: Optional[List[str]] = None,
+                 fixed_param_strategy: Optional[str] = None) -> None:
+        model.SockeyeModel.__init__(self, config=config)
+        self.context = context
+        self.output_dir = output_dir
+        self.fixed_param_names = fixed_param_names
+        self.fixed_param_strategy = fixed_param_strategy
+        self._bucketing = bucketing
+        self._gradient_compression_params = gradient_compression_params
+        self._initialize(provide_data, provide_label, default_bucket_key)
+        self._monitor = None  # type: Optional[mx.monitor.Monitor]
+
+    def _initialize(self,
+                    provide_data: List[mx.io.DataDesc],
+                    provide_label: List[mx.io.DataDesc],
+                    default_bucket_key: Tuple[int, int]):
+        """
+        Initializes model components, creates training symbol and module, and binds it.
+        """
+        source = mx.sym.Variable(C.SOURCE_NAME)
+        source_words = source.split(num_outputs=self.config.config_embed_source.num_factors,
+                                    axis=2, squeeze_axis=True)[0]
+        source_length = utils.compute_lengths(source_words)
+        target = mx.sym.Variable(C.TARGET_NAME)
+        target_length = utils.compute_lengths(target)
+        labels = mx.sym.reshape(data=mx.sym.Variable(C.TARGET_LABEL_NAME), shape=(-1,))
+
+        self.model_loss = loss.get_loss(self.config.config_loss)
+        self.cosine_loss = loss.get_loss(self.config.cosine_loss)
+
+        data_names = [C.SOURCE_NAME, C.TARGET_NAME]
+        label_names = [C.TARGET_LABEL_NAME]
+
+        # check provide_{data,label} names
+        provide_data_names = [d[0] for d in provide_data]
+        utils.check_condition(provide_data_names == data_names,
+                              "incompatible provide_data: %s, names should be %s" % (provide_data_names, data_names))
+        provide_label_names = [d[0] for d in provide_label]
+        utils.check_condition(provide_label_names == label_names,
+                              "incompatible provide_label: %s, names should be %s" % (provide_label_names, label_names))
+
+        def sym_gen(seq_lens):
+            """
+            Returns a (grouped) loss symbol given source & target input lengths.
+            Also returns data and label names for the BucketingModule.
+            """
+            source_seq_len, target_seq_len = seq_lens
+
+            # source embedding
+            (source_embed,
+             source_embed_length,
+             source_embed_seq_len) = self.embedding_source.encode(source, source_length, source_seq_len)
+
+            # target embedding
+            (target_embed,
+             target_embed_length,
+             target_embed_seq_len) = self.embedding_target.encode(target, target_length, target_seq_len)
+
+            # encoder
+            # source_encoded: (batch_size, source_encoded_length, encoder_depth)
+            (source_encoded,
+             source_encoded_length,
+             source_encoded_seq_len) = self.encoder.encode(source_embed,
+                                                           source_embed_length,
+                                                           source_embed_seq_len)
+             
+            (trg_encoded,
+             trg_encoded_length,
+             trg_encoded_seq_len) = self.encoder.encode(target_embed,
+                                                           target_embed_length,
+                                                           target_embed_seq_len)
+
+            # decoder
+            # target_decoded: (batch-size, target_len, decoder_depth)
+            target_decoded = self.decoder.decode_sequence(source_encoded, source_encoded_length, source_encoded_seq_len,
+                                                          target_embed, target_embed_length, target_embed_seq_len)
+
+            # target_decoded: (batch_size * target_seq_len, decoder_depth)
+            target_decoded = mx.sym.reshape(data=target_decoded, shape=(-3, 0))
+
+            # output layer
+            # logits: (batch_size * target_seq_len, target_vocab_size)
+            logits = self.output_layer(target_decoded)
+
+            loss_output = self.model_loss.get_loss(logits, labels)
+            loss_cosine = self.cosine_loss.get_loss(source_encoded, trg_encoded)
+            combined_loss = loss_output + loss_cosine
+
+            return mx.sym.Group(combined_loss), data_names, label_names
+
+        # Fix model parameters as needed for different training options.
+        utils.check_condition(not self.config.lhuc or self.fixed_param_strategy is None,
+                "LHUC fixes all other parameters and is thus not compatible with other fixing strategies.")
+        if self.config.lhuc:
+            arguments = sym_gen(default_bucket_key)[0].list_arguments()
+            fixed_param_names = [a for a in arguments if not a.endswith(C.LHUC_NAME)]
+        elif self.fixed_param_strategy is not None:
+            arguments = sym_gen(default_bucket_key)[0].list_arguments()
+            fixed_param_names = self._generate_fixed_param_names(arguments, self.fixed_param_strategy)
+        else:
+            fixed_param_names = self.fixed_param_names
+
+        if self._bucketing:
+            logger.info("Using bucketing. Default max_seq_len=%s", default_bucket_key)
+            self.module = mx.mod.BucketingModule(sym_gen=sym_gen,
+                                                 logger=logger,
+                                                 default_bucket_key=default_bucket_key,
+                                                 context=self.context,
+                                                 compression_params=self._gradient_compression_params,
+                                                 fixed_param_names=fixed_param_names)
+        else:
+            logger.info("No bucketing. Unrolled to (%d,%d)",
+                        self.config.config_data.max_seq_len_source, self.config.config_data.max_seq_len_target)
+            symbol, _, __ = sym_gen(default_bucket_key)
+            self.module = mx.mod.Module(symbol=symbol,
+                                        data_names=data_names,
+                                        label_names=label_names,
+                                        logger=logger,
+                                        context=self.context,
+                                        compression_params=self._gradient_compression_params,
+                                        fixed_param_names=fixed_param_names)
+
+        self.module.bind(data_shapes=provide_data,
+                         label_shapes=provide_label,
+                         for_training=True,
+                         force_rebind=True,
+                         grad_req='write')
+
+        self.module.symbol.save(os.path.join(self.output_dir, C.SYMBOL_NAME))
+
+        self.save_version(self.output_dir)
+        self.save_config(self.output_dir)
+
 
 def global_norm(ndarrays: List[mx.nd.NDArray]) -> float:
     # accumulate in a list, as asscalar is blocking and this way we can run the norm calculation in parallel.
@@ -598,6 +757,9 @@ class EarlyStoppingTrainer:
             logger.info("Training started.")
 
         metric_train, metric_val, metric_loss = self._create_metrics(metrics, self.model.optimizer, self.model.loss)
+        cosine_loss = None
+        if self.model.cosine_loss is not None:
+            cosine_loss = self.model.cosine_loss.create_metric()
 
         process_manager = None
         if decoder is not None:
@@ -637,7 +799,7 @@ class EarlyStoppingTrainer:
             # STEP
             ######
             batch = next_data_batch
-            self._step(self.model, batch, checkpoint_interval, metric_train, metric_loss)
+            self._step(self.model, batch, checkpoint_interval, metric_train, metric_loss, cosine_loss)
             batch_num_samples = batch.data[0].shape[0]
             batch_num_tokens = batch.data[0].shape[1] * batch_num_samples
             self.state.updates += 1
@@ -650,7 +812,7 @@ class EarlyStoppingTrainer:
             next_data_batch = train_iter.next()
             self.model.prepare_batch(next_data_batch)
 
-            speedometer(self.state.epoch, self.state.updates, batch_num_samples, batch_num_tokens, metric_train)
+            speedometer(self.state.epoch, self.state.updates, batch_num_samples, batch_num_tokens, metric_train, cosine_loss)
 
             ############
             # CHECKPOINT
@@ -780,7 +942,8 @@ class EarlyStoppingTrainer:
               batch: mx.io.DataBatch,
               checkpoint_interval: int,
               metric_train: mx.metric.EvalMetric,
-              metric_loss: Optional[mx.metric.EvalMetric] = None):
+              metric_loss: Optional[mx.metric.EvalMetric] = None,
+              metric_cosine_loss: Optional[mx.metric.EvalMetric] = None):
         """
         Performs an update to model given a batch and updates metrics.
         """
@@ -820,6 +983,12 @@ class EarlyStoppingTrainer:
             [(_, m_val)] = metric_loss.get_name_value()
             batch_state = BatchState(metric_val=m_val)
             optimizer.pre_update_batch(batch_state)
+        
+        if metric_cosine_loss is not None:
+            # Cosine distance encoded source + target for this batch
+            metric_cosine_loss.reset()
+            outputs = model.module.get_outputs()
+            metric_cosine_loss.update([model.module.get_outputs()[1]])
 
         ########
         # UPDATE
@@ -1208,7 +1377,7 @@ class Speedometer:
         self.tokens = 0
         self.msg = 'Epoch[%d] Batch [%d]\tSpeed: %.2f samples/sec %.2f tokens/sec %.2f updates/sec'
 
-    def __call__(self, epoch: int, updates: int, samples: int, tokens: int, metric: Optional[mx.metric.EvalMetric]):
+    def __call__(self, epoch: int, updates: int, samples: int, tokens: int, metric: Optional[mx.metric.EvalMetric], metric_cosine_loss: Optional[mx.metric.EvalMetric]):
         count = updates
         if self.last_count > count:
             self.init = False
@@ -1229,8 +1398,15 @@ class Speedometer:
                     name_value = metric.get_name_value()
                     if self.auto_reset:
                         metric.reset()
-                    logger.info(self.msg + '\t%s=%f' * len(name_value),
-                                epoch, count, samples_per_sec, tokens_per_sec, updates_per_sec, *sum(name_value, ()))
+                    if metric_cosine_loss is not None:
+                        cosine_name_value = metric_cosine_loss.get_name_value()
+                        if self.auto_reset:
+                            metric_cosine_loss.reset()
+                        logger.info(self.msg + '\t%s=%f' + '\t%s=%f' * len(name_value),
+                                epoch, count, samples_per_sec, tokens_per_sec, updates_per_sec, *sum(name_value, ()), *sum(cosine_name_value,()))   
+                    else:
+                        logger.info(self.msg + '\t%s=%f' * len(name_value),
+                                    epoch, count, samples_per_sec, tokens_per_sec, updates_per_sec, *sum(name_value, ()))
                 else:
                     logger.info(self.msg, epoch, count, samples_per_sec)
 

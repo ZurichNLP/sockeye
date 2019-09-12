@@ -59,6 +59,7 @@ class ModelConfig(Config):
                  config_encoder: encoder.EncoderConfig,
                  config_decoder: decoder.DecoderConfig,
                  config_loss: loss.LossConfig,
+                 cosine_loss: Optional[loss.LossConfig] = None,
                  weight_tying: bool = False,
                  weight_tying_type: Optional[str] = C.WEIGHT_TYING_TRG_SOFTMAX,
                  weight_normalization: bool = False,
@@ -72,6 +73,7 @@ class ModelConfig(Config):
         self.config_encoder = config_encoder
         self.config_decoder = config_decoder
         self.config_loss = config_loss
+        self.cosine_loss = cosine_loss
         self.weight_tying = weight_tying
         self.weight_tying_type = weight_tying_type
         self.weight_normalization = weight_normalization

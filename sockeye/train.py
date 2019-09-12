@@ -421,6 +421,7 @@ def create_encoder_config(args: argparse.Namespace,
         encoder_rnn_dropout_inputs, _ = args.rnn_dropout_inputs
         encoder_rnn_dropout_states, _ = args.rnn_dropout_states
         encoder_rnn_dropout_recurrent, _ = args.rnn_dropout_recurrent
+        
         config_encoder = encoder.RecurrentEncoderConfig(
             rnn_config=rnn.RNNConfig(cell_type=args.rnn_cell_type,
                                      num_hidden=args.rnn_num_hidden,
@@ -684,6 +685,12 @@ def create_model_config(args: argparse.Namespace,
                                   vocab_size=target_vocab_size,
                                   normalization_type=args.loss_normalization_type,
                                   label_smoothing=args.label_smoothing)
+    cosine_config_loss = None
+    if args.use_cosine_distance_loss:
+        cosine_config_loss = loss.LossConfig(name='cosine-distance',
+                                  vocab_size=None,
+                                  normalization_type=None,
+                                  label_smoothing=None)
 
     model_config = model.ModelConfig(config_data=config_data,
                                      vocab_source_size=source_vocab_size,
@@ -696,7 +703,8 @@ def create_model_config(args: argparse.Namespace,
                                      weight_tying=args.weight_tying,
                                      weight_tying_type=args.weight_tying_type if args.weight_tying else None,
                                      weight_normalization=args.weight_normalization,
-                                     lhuc=args.lhuc is not None)
+                                     lhuc=args.lhuc is not None,
+                                     cosine_loss=cosine_config_loss)
     return model_config
 
 
@@ -716,6 +724,17 @@ def create_training_model(config: model.ModelConfig,
     :return: The training model.
     """
     training_model = training.TrainingModel(config=config,
+                                            context=context,
+                                            output_dir=output_dir,
+                                            provide_data=train_iter.provide_data,
+                                            provide_label=train_iter.provide_label,
+                                            default_bucket_key=train_iter.default_bucket_key,
+                                            bucketing=not args.no_bucketing,
+                                            gradient_compression_params=gradient_compression_params(args),
+                                            fixed_param_names=args.fixed_param_names,
+                                            fixed_param_strategy=args.fixed_param_strategy)
+    if args.use_cosine_distance_loss:
+        training_model = training.CosineEncoderModel(config=config,
                                             context=context,
                                             output_dir=output_dir,
                                             provide_data=train_iter.provide_data,

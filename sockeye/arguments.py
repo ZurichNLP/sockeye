@@ -1125,6 +1125,7 @@ def add_train_cli_args(params):
     add_training_args(params)
     add_device_args(params)
     add_logging_args(params)
+    add_multilingual_args(params)
 
 
 def add_translate_cli_args(params):
@@ -1403,3 +1404,8 @@ def add_init_embedding_args(params):
                         help='File to write initialized parameters to.')
     params.add_argument('--encoding', '-c', type=str, default=C.VOCAB_ENCODING,
                         help='Open input vocabularies with specified encoding. Default: %(default)s.')
+    
+def add_multilingual_args(params):
+    params.add_argument('--use-cosine-distance-loss',
+                        action='store_true',
+                        help='Use cosine distance between encoded source and target sequence as additional loss in a multilingual model. Assumes model is bidirectional and vocab is shared across all languages.')
