@@ -48,6 +48,10 @@ def main():
                         type=arguments.int_greater_or_equal(1),
                         default=10,
                         help='Width of buckets in tokens. Default: %(default)s.')
+    parser.add_argument('--print-labels',
+                        action='store_true',
+                        default=False,
+                        help='Print distribution of labels for each class. Default: %(default)s.')
     
     
     
@@ -92,7 +96,7 @@ def main():
         
         # sentences longer than in the conll training data 
 
-        bpe_sequences, tag_sequences = train_morphology.preprocess(token_sequences, tags, truecase_model, bpe_model, bpe_vocab, target)
+        bpe_sequences, tag_sequences, token_sequences = train_morphology.preprocess(token_sequences, tags, truecase_model, bpe_model, bpe_vocab, target)
     
         max_source = max([source_sentence.split() for source_sentence in bpe_sequences], key=len)
         max_seq_len_source = len(max_source) +1 # <eos>
@@ -122,11 +126,18 @@ def main():
                                             token_sequences=token_sequences,
                                             fixed_max_length_subwords=max_length_subwords)
         
-        labels, encoded_tokens = train_morphology.make_classifier_input(training_tokens, feature ,max_length_subwords) # labels: (sample_size,), encoded_tokens: (sample_size, max_length_subwords, hidden_dimension)
+        labels, encoded_tokens,labels_to_print = train_morphology.make_classifier_input(training_tokens, feature ,max_length_subwords) # labels: (sample_size,), encoded_tokens: (sample_size, max_length_subwords, hidden_dimension)
         
         (sample_size, max_length_subwords, hidden_dimension) = encoded_tokens.shape
         (sample_size_labels, ) = labels.shape
         print("testing sample size: ", sample_size)
+        
+        if args.print_labels:
+            labels_to_print.sort()
+            logger.info("label frequency for feature: {}".format(args.feature))
+            logger.info("total labels: {}".format(len(labels_to_print)))
+            logger.info(Counter(labels_to_print).keys())
+            logger.info(Counter(labels_to_print).values())
             
         if sample_size != sample_size_labels:
             print("shapes do not match, encoded sequences have {} samples, but labels have {}".format(sample_size, sample_size_labels))

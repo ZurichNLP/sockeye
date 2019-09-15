@@ -13,7 +13,7 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.model_selection import train_test_split
 import joblib
 import json
-from collections import OrderedDict
+from collections import OrderedDict, Counter
 import numpy as np
 import re
 from six import text_type
@@ -403,7 +403,7 @@ def encode(inputs: List[Input],
             encoder_states = [state.asnumpy() for state in encoder_states]
             #print(encoder_states[0].shape, len(encoder_states))
             encoded_sequences.extend(encoder_states) # list of batches [batch, batch]
-     
+        #print("len encoded seq ", len(encoded_sequences))
         return encoded_sequences # len(encoded_sequences)= number of batches
     
 
@@ -450,6 +450,7 @@ def preprocess(sequences: List[str],
     #mpn = sacremoses.MosesPunctNormalizer(lang='de')
     preprocessed_sequences = []
     tag_sequences = []
+    string_sentences =[]
     
     # normalizer changes the tokenization/removes the whitespace before  some characters: %, :, ?, !, ;
     # -> need to fix this 
@@ -487,9 +488,12 @@ def preprocess(sequences: List[str],
             #print("tags list: ", tags_list)
         if target != None:
             tag = "<2" + target + ">"
-            bpe_list.insert(0, tag)
+            bpe_split = tag + " " + bpe_split
+            bpe_list.insert(0,tag)
             tags_list.insert(0,None)
+            sentence.insert(0, tag)
             
+        string_sentences.append(sentence)
         preprocessed_sequences.append(bpe_split)
         tag_sequences.append(tags_list)
         if len(bpe_list) != len(tags_list): # TODO: check if elements != None are same length
@@ -497,7 +501,7 @@ def preprocess(sequences: List[str],
             logger.warn("bpe: {}, tags {}".format(len(bpe_list), len(tags_list)))
             exit(0)
 
-    return preprocessed_sequences, tag_sequences
+    return preprocessed_sequences, tag_sequences, string_sentences
 
 
 def get_encoded_tokens(encoded_sequences: List[List[np.array]], 
@@ -522,6 +526,7 @@ def get_encoded_tokens(encoded_sequences: List[List[np.array]],
             #print("len encoded_sequence {}, len bpe {}, tag sequence {}".format(len(encoded_sequence), len(bpe_sentence), len(tag_sequence)))
             #print(tag_sequence)
             #print(bpe_sentence)
+            #print(token_sequence)
         
             
             bpe_iterator=0
@@ -566,7 +571,7 @@ def get_encoded_tokens(encoded_sequences: List[List[np.array]],
                                                             }
                                                  )
                 # get gender, number, case etc
-                #print("features ", features, "language ", language) # TODO debug Finnish
+                #print("features ", features, "language ", language) 
                 if features is not None:
                     for tag in features:
                         if language == "de" and tag != "PASS" and tag !="REFL" and tag !="NEG": # German has only NEG annotations, but not POS, also only PASS, but not ACT. valency only has REFL annotations in all languages
@@ -588,14 +593,15 @@ def get_encoded_tokens(encoded_sequences: List[List[np.array]],
         elif counted_max_length_subwords > fixed_max_length_subwords:
             logger.warn("Number of subword units exceeds given max length in data. Given max length: {}, counted max length {}".format(fixed_max_length_subwords, counted_max_length_subwords))
             fixed_max_length_subwords = counted_max_length_subwords
-    #print(len(training_tokens))
     return training_tokens, fixed_max_length_subwords
     
 def make_classifier_input(training_tokens: List[ClassifierInput], 
                           feature: str,
-                          max_length_subwords: int):
+                          max_length_subwords: int,
+                          print_labels: Optional[bool]=False):
     encoded_tokens =[]
     labels = []
+    labels_to_print = []
     
     # get only tokens that have the given feature
     for training_token in training_tokens:
@@ -605,6 +611,8 @@ def make_classifier_input(training_tokens: List[ClassifierInput],
             encoded_word = training_token.encoder_states # encoded_word: List of NDArrays with shape(hidden_dimension, )
             missing_length = max_length_subwords - len(encoded_word)
             data_type=encoded_word[0].dtype
+            if print_labels:
+                labels_to_print.append(label)
             
             ## pad encoded tokens to max length to get input of uniform length
             if missing_length > 0:
@@ -627,7 +635,8 @@ def make_classifier_input(training_tokens: List[ClassifierInput],
     labels = np.array(labels, dtype=data_type) # shape (sample_size,)
     encoded_tokens = np.array([np.array(seq, dtype=data_type) for seq in encoded_tokens], dtype=data_type) # shape (sample_size, max_length_subwords, hidden_dimension)
     #print(encoded_tokens.shape, encoded_tokens.dtype)
-    return labels,encoded_tokens
+    
+    return labels,encoded_tokens, labels_to_print
 
 def train_logistic_regression(labels: np.array, encoded_sequences: np.array, max_iter: int, context: mx.context.Context):
     model = LogisticRegression(solver='lbfgs', multi_class='multinomial', max_iter=max_iter)
@@ -715,6 +724,7 @@ def evaluate_accuracy(data_iterator, net, context):
         acc.update(preds=predictions, labels=label)
     return acc.get()[1]
 
+
 def main():
     parser = argparse.ArgumentParser(description='Encode given sequences and use encoder hidden states to train a logistic regression model that labels morphology.')
     arguments.add_device_args(parser)
@@ -770,6 +780,10 @@ def main():
                         type=str, 
                         default=None,
                         help='Target language (will insert <2lang> at beginning of each sentence). Default: %(default)s.')
+    parser.add_argument('--print-labels',
+                        action='store_true',
+                        default=False,
+                        help='Print distribution of labels for each class. Default: %(default)s.')
     
     args = parser.parse_args()
     
@@ -798,7 +812,7 @@ def main():
     token_sequences = [[token["form"] for token in sentence] for sentence in conll]
     tags = [[token["feats"] for token in sentence] for sentence in conll]
 
-    bpe_sequences, tag_sequences = preprocess(token_sequences, tags, args.truecase_model, args.bpe_model, args.bpe_vocab, args.target)
+    bpe_sequences, tag_sequences, token_sequences = preprocess(token_sequences, tags, args.truecase_model, args.bpe_model, args.bpe_vocab, args.target)
 
     max_source = max([source_sentence.split() for source_sentence in bpe_sequences], key=len)
     if args.target != None:
@@ -834,7 +848,8 @@ def main():
                                          fixed_max_length_subwords=args.max_bpe_units_per_word)
     
     logger.info("create training samples for LR")
-    labels, encoded_tokens = make_classifier_input(training_tokens, args.feature ,max_length_subwords) # labels: (sample_size,), encoded_tokens: (sample_size, max_length_subwords, hidden_dimension)
+    labels, encoded_tokens,labels_to_print = make_classifier_input(training_tokens, args.feature ,max_length_subwords, args.print_labels) # labels: (sample_size,), encoded_tokens: (sample_size, max_length_subwords, hidden_dimension)
+
     
     logger.info("train classifier")
     # limit size of train set to 250k
@@ -842,6 +857,14 @@ def main():
     if len(labels) > cutoff:
         (encoded_tokens, rest) = np.split(encoded_tokens, [cutoff])
         (labels, rest) = np.split(labels, [cutoff])
+        labels_to_print = labels_to_print[:cutoff]
+    
+    if args.print_labels:
+        labels_to_print.sort()
+        logger.info("label frequency for feature: {}".format(args.feature))
+        logger.info("total labels: {}".format(len(labels_to_print)))
+        logger.info(Counter(labels_to_print).keys())
+        logger.info(Counter(labels_to_print).values())
     
     if args.train_on_gpu:
         #num_outputs = num_labels[args.language][args.feature]
