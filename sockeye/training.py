@@ -759,7 +759,11 @@ class EarlyStoppingTrainer:
         :param ignore_existing_data_config: Ignore config_data of existing model config
         :return:
         """
-        logger.info("Resampling sentencepiece segmentation at the start of epoch: %d" % self.state.epoch)
+        try:
+            epoch = self.state.epoch
+        except AttributeError:
+            epoch = 1
+        logger.info("Resampling sentencepiece segmentation at the start of epoch: %d" % epoch)
 
         output_folder = self.model.output_dir
 
@@ -902,6 +906,10 @@ class EarlyStoppingTrainer:
         self._initialize_parameters(existing_parameters, allow_missing_parameters, allow_extra_parameters)
         self._initialize_optimizer()
 
+        if args.sentencepiece:
+            # ignore iters given as arguments, ignore existing data config since statistics are without segmentation
+            train_iter = self.replace_iters_update_config(args=args, ignore_existing_data_config=True)
+
         resume_training = os.path.exists(self.training_state_dirname)
         if resume_training:
             logger.info("Found partial training in '%s'. Resuming from saved state.", self.training_state_dirname)
@@ -928,10 +936,6 @@ class EarlyStoppingTrainer:
 
         speedometer = Speedometer(frequency=C.MEASURE_SPEED_EVERY, auto_reset=False)
         tic = time.time()
-
-        if args.sentencepiece:
-            # ignore iters given as arguments, ignore existing data config since statistics are without segmentation
-            train_iter = self.replace_iters_update_config(args=args, ignore_existing_data_config=True)
 
         next_data_batch = train_iter.next()
         while True:
