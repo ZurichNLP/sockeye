@@ -1409,3 +1409,6 @@ def add_multilingual_args(params):
     params.add_argument('--use-cosine-distance-loss',
                         action='store_true',
                         help='Use cosine distance between encoded source and target sequence as additional loss in a multilingual model. Assumes model is bidirectional and vocab is shared across all languages.')
+    params.add_argument('--log-cosine-distance-per-batch',
+                        action='store_true',
+                        help='Log cosine distance between sentence pairs for each batch.')
