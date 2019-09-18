@@ -204,16 +204,42 @@ class CosineDistance(Loss):
         logger.info("Loss: CosineDistance")
         self.loss_config = loss_config
     
-    def get_loss(self, encoded_sequence1: mx.sym.Symbol, encoded_sequence2: mx.sym.Symbol) -> List[mx.sym.Symbol]:
+    def get_loss(self, 
+                 encoded_sequence1: mx.sym.Symbol,
+                 seq1_labels: mx.sym.Symbol,
+                 source_len: int,
+                 encoded_sequence2: mx.sym.Symbol, 
+                 seq2_labels: mx.sym.Symbol,
+                 trg_len: int) -> List[mx.sym.Symbol]:
         return [
-                mx.sym.MakeLoss(self.symbol_cosine_distance_avg(encoded_sequence1, encoded_sequence2))]
+                mx.sym.MakeLoss(self.symbol_cosine_distance_avg(encoded_sequence1,
+                                                                seq1_labels,
+                                                                source_len,
+                                                                encoded_sequence2,
+                                                                seq2_labels,
+                                                                trg_len))]
     
     def create_metric(self) -> "CosineDistanceMetric":
         return CosineDistanceMetric(self.loss_config)
     
     #TODO: mask padded ids?
-    def symbol_cosine_distance_avg(self, seq1, seq2):
-         # seq1, seq2: shape(batch_size,seq_length,dimension)
+    def symbol_cosine_distance_avg(self, 
+                                   seq1: mx.sym.Symbol, 
+                                   seq1_labels: mx.sym.Symbol,
+                                   seq1_len: int,
+                                   seq2: mx.sym.Symbol, 
+                                   seq2_labels: mx.sym.Symbol,
+                                   seq2_len: int):
+        # mask padded symbols, label shape (batch_size*sentence_length,), seq shape(batch, sentence_length, hidden)
+        valid1 = (seq1_labels != C.PAD_ID).reshape(shape=(-1,1))
+        valid2 = (seq2_labels != C.PAD_ID).reshape(shape=(-1,1)) # shape(batch*sentence_length,1), padded=0, else=1
+        
+        seq1_r = seq1.reshape(shape=(-3,-1)) # shape(batch_size*sentence_length, hidden)
+        seq2_r = seq2.reshape(shape=(-3,-1))
+        
+        seq1 = mx.sym.broadcast_mul(seq1_r, valid1).reshape_like(seq1)
+        seq2 = mx.sym.broadcast_mul(seq2_r, valid2).reshape_like(seq2)
+        
         # -> shape(batch_size, dimension)
         avg1 = mx.sym.mean(seq1,axis=1)
         avg2 = mx.sym.mean(seq2,axis=1)
@@ -249,29 +275,31 @@ class CosineDistanceMetric(EvalMetric):
         super().__init__(name, output_names=output_names, label_names=label_names)
         self.loss_config = loss_config
 
-    @staticmethod
-    def cosine_distance_avg(seq1, seq2):
-        # seq1, seq2: shape(batch_size,seq_length,dimension)
-        # -> shape(batch_size, dimension)
-        avg1 = mx.nd.mean(seq1,axis=1)
-        avg2 = mx.nd.mean(seq2,axis=1)
-        expanded1 = mx.nd.expand_dims(avg1, axis=1)  # expanded1: (batch_size, 1, dimension)
-        expanded2 = mx.nd.expand_dims(avg2, axis=2) # expanded2: (batch_size, dimension, 1)
-        dot_prod = mx.nd.batch_dot(expanded1, expanded2)#[:,0,0] # dot_prod: (batch_size,1,1) 
-        dot_prod = mx.nd.squeeze(dot_prod) # -> (batch_size)
-        norm1 = mx.nd.sqrt(mx.sym.sum((avg1 * avg1), axis=1))
-        norm2 = mx.nd.sqrt(mx.sym.sum((avg2 * avg2), axis=1))
-        similarity = dot_prod / (norm1 * norm2)
-        distance = 1.0 - similarity # mx.sym.Symbol, shape(batch_size,)
-        return distance
+    #@staticmethod
+    #def cosine_distance_avg(seq1, seq2):
+        ## seq1, seq2: shape(batch_size,seq_length,dimension)
+        ## -> shape(batch_size, dimension)
+        #avg1 = mx.nd.mean(seq1,axis=1)
+        #avg2 = mx.nd.mean(seq2,axis=1)
+        #expanded1 = mx.nd.expand_dims(avg1, axis=1)  # expanded1: (batch_size, 1, dimension)
+        #expanded2 = mx.nd.expand_dims(avg2, axis=2) # expanded2: (batch_size, dimension, 1)
+        #dot_prod = mx.nd.batch_dot(expanded1, expanded2)#[:,0,0] # dot_prod: (batch_size,1,1) 
+        #dot_prod = mx.nd.squeeze(dot_prod) # -> (batch_size)
+        #norm1 = mx.nd.sqrt(mx.sym.sum((avg1 * avg1), axis=1))
+        #norm2 = mx.nd.sqrt(mx.sym.sum((avg2 * avg2), axis=1))
+        #similarity = dot_prod / (norm1 * norm2)
+        #distance = 1.0 - similarity # mx.sym.Symbol, shape(batch_size,)
+        #return distance
     
 
 
 
-    def update(self, distances):
+    def update(self, distances, log_cosine_distance_per_batch):
         for distance in distances:
-            batch_size = len(distances)
+            (batch_size,) = distance.shape
             distance = mx.nd.sum(distance)
             self.num_inst += batch_size
             self.sum_metric += distance.asscalar()
+            if log_cosine_distance_per_batch:
+                logger.info("Average cosine distance for batch: {}".format(self.sum_metric/self.num_inst))
 

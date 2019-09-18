@@ -485,6 +485,7 @@ class CosineEncoderModel(TrainingModel):
         source_words = source.split(num_outputs=self.config.config_embed_source.num_factors,
                                     axis=2, squeeze_axis=True)[0]
         source_length = utils.compute_lengths(source_words)
+        source_labels = mx.sym.reshape(data=source_words, shape=(-1,), name=C.SOURCE_LABEL_NAME)
         target = mx.sym.Variable(C.TARGET_NAME)
         target_length = utils.compute_lengths(target)
         labels = mx.sym.reshape(data=mx.sym.Variable(C.TARGET_LABEL_NAME), shape=(-1,))
@@ -528,6 +529,7 @@ class CosineEncoderModel(TrainingModel):
                                                            source_embed_length,
                                                            source_embed_seq_len)
              
+             # assumption: bidirectional model, encoder knows target language
             (trg_encoded,
              trg_encoded_length,
              trg_encoded_seq_len) = self.encoder.encode(target_embed,
@@ -547,7 +549,7 @@ class CosineEncoderModel(TrainingModel):
             logits = self.output_layer(target_decoded)
 
             loss_output = self.model_loss.get_loss(logits, labels)
-            loss_cosine = self.cosine_loss.get_loss(source_encoded, trg_encoded)
+            loss_cosine = self.cosine_loss.get_loss(source_encoded, source_labels, source_encoded_seq_len, trg_encoded, labels, trg_encoded_seq_len)
             combined_loss = loss_output + loss_cosine
 
             return mx.sym.Group(combined_loss), data_names, label_names
@@ -696,7 +698,8 @@ class EarlyStoppingTrainer:
             mxmonitor_pattern: Optional[str] = None,
             mxmonitor_stat_func: Optional[str] = None,
             allow_missing_parameters: bool = False,
-            existing_parameters: Optional[str] = None) -> TrainState:
+            existing_parameters: Optional[str] = None,
+            log_cosine_distance_per_batch: Optional[bool] = False) -> TrainState:
         """
         Fits model to data given by train_iter using early-stopping w.r.t data given by val_iter.
         Saves all intermediate and final output to output_folder.
@@ -799,7 +802,7 @@ class EarlyStoppingTrainer:
             # STEP
             ######
             batch = next_data_batch
-            self._step(self.model, batch, checkpoint_interval, metric_train, metric_loss, cosine_loss)
+            self._step(self.model, batch, checkpoint_interval, metric_train, metric_loss, cosine_loss, log_cosine_distance_per_batch)
             batch_num_samples = batch.data[0].shape[0]
             batch_num_tokens = batch.data[0].shape[1] * batch_num_samples
             self.state.updates += 1
@@ -943,7 +946,8 @@ class EarlyStoppingTrainer:
               checkpoint_interval: int,
               metric_train: mx.metric.EvalMetric,
               metric_loss: Optional[mx.metric.EvalMetric] = None,
-              metric_cosine_loss: Optional[mx.metric.EvalMetric] = None):
+              metric_cosine_loss: Optional[mx.metric.EvalMetric] = None,
+              log_cosine_distance_per_batch: Optional[bool] = False ):
         """
         Performs an update to model given a batch and updates metrics.
         """
@@ -988,7 +992,7 @@ class EarlyStoppingTrainer:
             # Cosine distance encoded source + target for this batch
             metric_cosine_loss.reset()
             outputs = model.module.get_outputs()
-            metric_cosine_loss.update([model.module.get_outputs()[1]])
+            metric_cosine_loss.update([model.module.get_outputs()[1]], log_cosine_distance_per_batch)
 
         ########
         # UPDATE

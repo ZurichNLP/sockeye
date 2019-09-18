@@ -176,6 +176,7 @@ COVERAGE_TYPES = [TANH,
 # default I/O variable names
 SOURCE_NAME = "source"
 SOURCE_LENGTH_NAME = "source_length"
+SOURCE_LABEL_NAME = "source_label"
 TARGET_NAME = "target"
 TARGET_LABEL_NAME = "target_label"
 LEXICON_NAME = "lexicon"
