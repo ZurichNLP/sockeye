@@ -1117,6 +1117,11 @@ def add_training_args(params):
                               action='store_true',
                               help="Do not perform any actual training, but print statistics about the model"
                               " and mode of operation.")
+    
+    train_params.add_argument('--update-interval',
+                              type=int,
+                              default=1,
+                              help="Number of batch gradients to accumulate before updating. Default: %(default)s.")
 
 
 def add_train_cli_args(params):

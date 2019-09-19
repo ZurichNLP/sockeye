@@ -731,6 +731,7 @@ def create_training_model(config: model.ModelConfig,
                                             default_bucket_key=train_iter.default_bucket_key,
                                             bucketing=not args.no_bucketing,
                                             gradient_compression_params=gradient_compression_params(args),
+                                            gradient_accumulation=args.update_interval > 1,
                                             fixed_param_names=args.fixed_param_names,
                                             fixed_param_strategy=args.fixed_param_strategy)
     if args.use_cosine_distance_loss:
@@ -742,6 +743,7 @@ def create_training_model(config: model.ModelConfig,
                                             default_bucket_key=train_iter.default_bucket_key,
                                             bucketing=not args.no_bucketing,
                                             gradient_compression_params=gradient_compression_params(args),
+                                            gradient_accumulation=args.update_interval > 1,
                                             fixed_param_names=args.fixed_param_names,
                                             fixed_param_strategy=args.fixed_param_strategy)
 
@@ -779,6 +781,7 @@ def create_optimizer_config(args: argparse.Namespace, source_vocab_sizes: List[i
     else:
         gradient_clipping_type = args.gradient_clipping_type
 
+    effective_batch_size = args.batch_size * args.update_interval
     # Note: for 'abs' we use the implementation inside of MXNet's optimizer and 'norm_*' we implement ourselves
     # inside the TrainingModel.
     if gradient_clipping_threshold is not None and gradient_clipping_type == C.GRADIENT_CLIPPING_TYPE_ABS:
@@ -790,7 +793,7 @@ def create_optimizer_config(args: argparse.Namespace, source_vocab_sizes: List[i
         optimizer_params["rescale_grad"] = 1.0
     elif args.loss_normalization_type == C.LOSS_NORM_BATCH:
         # Making MXNet module API's default scaling factor explicit
-        optimizer_params["rescale_grad"] = 1.0 / args.batch_size
+        optimizer_params["rescale_grad"] = 1.0 / effective_batch_size
     # Manually specified params
     if args.optimizer_params:
         optimizer_params.update(args.optimizer_params)
@@ -817,10 +820,14 @@ def create_optimizer_config(args: argparse.Namespace, source_vocab_sizes: List[i
                              kvstore=args.kvstore,
                              initializer=weight_init,
                              gradient_clipping_type=gradient_clipping_type,
-                             gradient_clipping_threshold=gradient_clipping_threshold)
+                             gradient_clipping_threshold=gradient_clipping_threshold,
+                             update_interval=args.update_interval)
     config.set_lr_scheduler(lr_sched)
     logger.info("Optimizer: %s", config)
     logger.info("Gradient Compression: %s", gradient_compression_params(args))
+    if args.update_interval > 1:
+        logger.info("Gradient accumulation over %d batches. Effective batch size: %d",
+                    args.update_interval, effective_batch_size)
     return config
 
 
@@ -955,7 +962,8 @@ def train(args: argparse.Namespace) -> training.TrainState:
                                      mxmonitor_pattern=args.monitor_pattern,
                                      mxmonitor_stat_func=args.monitor_stat_func,
                                      allow_missing_parameters=args.allow_missing_params or model_config.lhuc,
-                                     existing_parameters=args.params)
+                                     existing_parameters=args.params,
+                                     log_cosine_distance_per_batch=args.log_cosine_distance_per_batch)
         return training_state
 
 if __name__ == "__main__":
