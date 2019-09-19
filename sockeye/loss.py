@@ -297,9 +297,11 @@ class CosineDistanceMetric(EvalMetric):
     def update(self, distances, log_cosine_distance_per_batch):
         for distance in distances:
             (batch_size,) = distance.shape
+            print("batch_size {}", batch_size)
             distance = mx.nd.sum(distance)
             self.num_inst += batch_size
             self.sum_metric += distance.asscalar()
+            print("acc metric {}, acc inst {}".format(self.sum_metric, self.num_inst))
             if log_cosine_distance_per_batch:
-                logger.info("Average cosine distance for batch: {}".format(self.sum_metric/self.num_inst))
+                logger.info("Accumulated average cosine distance for batch: {}".format(self.sum_metric/self.num_inst))
 

@@ -775,7 +775,7 @@ class EarlyStoppingTrainer:
 
         metric_train, metric_val, metric_loss = self._create_metrics(metrics, self.model.optimizer, self.model.loss)
         cosine_loss = None
-        if self.model.cosine_loss is not None:
+        if hasattr(self.model, 'cosine_loss')  and self.model.cosine_loss is not None:
             cosine_loss = self.model.cosine_loss.create_metric()
 
         process_manager = None
