@@ -471,6 +471,7 @@ class CosineEncoderModel(TrainingModel):
                  provide_label: List[mx.io.DataDesc],
                  default_bucket_key: Tuple[int, int],
                  bucketing: bool,
+                 cosine_lambda: float,
                  gradient_compression_params: Optional[Dict[str, Any]] = None,
                  gradient_accumulation: bool = False,
                  fixed_param_names: Optional[List[str]] = None,
@@ -481,6 +482,7 @@ class CosineEncoderModel(TrainingModel):
         self.fixed_param_names = fixed_param_names
         self.fixed_param_strategy = fixed_param_strategy
         self._bucketing = bucketing
+        self._cosine_lambda = cosine_lambda
         self._gradient_compression_params = gradient_compression_params
         self._gradient_accumulation = gradient_accumulation
         self._initialize(provide_data, provide_label, default_bucket_key)
@@ -560,8 +562,8 @@ class CosineEncoderModel(TrainingModel):
             # logits: (batch_size * target_seq_len, target_vocab_size)
             logits = self.output_layer(target_decoded)
 
-            loss_output = self.model_loss.get_loss(logits, labels)
-            loss_cosine = self.cosine_loss.get_loss(source_encoded, source_labels, source_encoded_seq_len, trg_encoded, labels, trg_encoded_seq_len)
+            loss_output = self.model_loss.get_loss(logits, labels, grad_scale=1.0-self._cosine_lambda)
+            loss_cosine = self.cosine_loss.get_loss(source_encoded, source_labels, source_encoded_seq_len, trg_encoded, labels, trg_encoded_seq_len, grad_scale=self._cosine_lambda)
             combined_loss = loss_output + loss_cosine
 
             return mx.sym.Group(combined_loss), data_names, label_names

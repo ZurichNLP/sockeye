@@ -1417,3 +1417,7 @@ def add_multilingual_args(params):
     params.add_argument('--log-cosine-distance-per-batch',
                         action='store_true',
                         help='Log cosine distance between sentence pairs for each batch.')
+    params.add_argument('--lambda-cosine-loss',
+                              default=0.3,
+                              type=float,
+                              help='Scale cosine loss by lambda, ce loss by 1-lambda. Default: %(default)s.')
