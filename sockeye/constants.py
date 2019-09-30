@@ -339,6 +339,8 @@ OUTPUT_HANDLERS = [OUTPUT_HANDLER_TRANSLATION,
 # metrics
 ACCURACY = 'accuracy'
 PERPLEXITY = 'perplexity'
+TRANSLATION_PERPLEXITY = PERPLEXITY + '-translation'
+RECONSTRUCTION_PERPLEXITY =  PERPLEXITY + '-reconstruction'
 BLEU = 'bleu'
 CHRF = 'chrf'
 ROUGE = 'rouge'
@@ -353,9 +355,19 @@ ROUGE_2_VAL = ROUGE2 + "-val"
 ROUGE_L_VAL = ROUGEL + "-val"
 AVG_TIME = "avg-sec-per-sent-val"
 DECODING_TIME = "decode-walltime-val"
-METRICS = [PERPLEXITY, ACCURACY, BLEU, ROUGE1]
-METRIC_MAXIMIZE = {ACCURACY: True, BLEU: True, ROUGE1: True, PERPLEXITY: False}
-METRIC_WORST = {ACCURACY: 0.0, BLEU: 0.0, ROUGE1: 0.0, PERPLEXITY: np.inf}
+METRICS = [PERPLEXITY, TRANSLATION_PERPLEXITY, RECONSTRUCTION_PERPLEXITY, ACCURACY, BLEU, ROUGE1]
+METRIC_MAXIMIZE = {ACCURACY: True,
+                   BLEU: True,
+                   ROUGE1: True,
+                   PERPLEXITY: False,
+                   TRANSLATION_PERPLEXITY: False,
+                   RECONSTRUCTION_PERPLEXITY: False}
+METRIC_WORST = {ACCURACY: 0.0,
+                BLEU: 0.0,
+                ROUGE1: 0.0,
+                PERPLEXITY: np.inf,
+                TRANSLATION_PERPLEXITY: np.inf,
+                RECONSTRUCTION_PERPLEXITY: np.inf}
 
 # loss
 CROSS_ENTROPY = 'cross-entropy'

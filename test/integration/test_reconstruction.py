@@ -105,7 +105,8 @@ ENCODER_DECODER_SETTINGS = [
      " --weight-tying --weight-tying-type src_trg_softmax"
      " --weight-init-scale=3.0 --weight-init-xavier-factor-type=avg --embed-weight-init=normal"
      " --batch-size 2 --max-updates 2 --batch-type sentence --decode-and-evaluate 0"
-     " --checkpoint-frequency 2 --optimizer adam --initial-learning-rate 0.01",
+     " --checkpoint-frequency 2 --optimizer adam --initial-learning-rate 0.01"
+     " --metrics perplexity perplexity-reconstruction --optimized-metric perplexity",
      "--beam-size 2",
      False, False, False),]
 

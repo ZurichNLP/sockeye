@@ -448,18 +448,19 @@ class TrainingModel(model.SockeyeModel):
         self.save_version(self.output_dir)
         self.save_config(self.output_dir)
 
-    def run_forward_backward(self, batch: mx.io.DataBatch, metric: mx.metric.EvalMetric):
+    def run_forward_backward(self,
+                             batch: mx.io.DataBatch,
+                             metric: mx.metric.EvalMetric):
         """
         Runs forward/backward pass and updates training metric(s).
         """
         self.module.forward_backward(batch)
-        if self.reconstruction == C.BILINGUAL or self.reconstruction == C.BILINGUAL_HIDDEN:
-            source = batch.data[0].split(num_outputs=self.config.config_embed_source.num_factors,
-                                         axis=2, squeeze_axis=True)
-            source = source if self.config.config_embed_source.num_factors == 1 else source[0]
-            self.module.update_metric(metric, [source])
-        else:
-            self.module.update_metric(metric, batch.label)
+
+        # expect CompositeEvalMetric with several child metrics
+        # update each metric individually to be able to specify individual labels
+        for child_metric in metric.metrics:
+            label = self.get_label_for_metric(batch, child_metric)
+            self.module.update_metric(child_metric, label)
 
     def update(self):
         """
@@ -510,13 +511,35 @@ class TrainingModel(model.SockeyeModel):
         """
         self.module.prepare(batch)
 
-    def evaluate(self, eval_iter: data_io.BaseParallelSampleIter, eval_metric: mx.metric.EvalMetric):
+    def evaluate(self,
+                 eval_iter: data_io.BaseParallelSampleIter,
+                 eval_metric: mx.metric.EvalMetric):
         """
         Resets and recomputes evaluation metric on given data iterator.
         """
         for eval_batch in eval_iter:
             self.module.forward(eval_batch, is_train=False)
-            self.module.update_metric(eval_metric, eval_batch.label)
+            for child_metric in eval_metric.metrics:
+                label = self.get_label_for_metric(eval_batch, child_metric)
+                self.module.update_metric(child_metric, label)
+
+    def get_label_for_metric(self,
+                             batch: mx.io.DataBatch,
+                             metric: mx.metric.EvalMetric):
+        """
+        Given the name of a metric, decide on the labels.
+        """
+        label = batch.label
+
+        if metric.name == C.RECONSTRUCTION_PERPLEXITY:
+            if self.reconstruction == C.BILINGUAL or self.reconstruction == C.BILINGUAL_HIDDEN:
+                source = batch.data[0].split(num_outputs=self.config.config_embed_source.num_factors,
+                                             axis=2, squeeze_axis=True)
+                source = source if self.config.config_embed_source.num_factors == 1 else source[0]
+                label = [source]
+
+        return label
+
 
     @property
     def current_module(self) -> mx.module.Module:
@@ -544,11 +567,13 @@ class TrainingModel(model.SockeyeModel):
         # TODO: Push update to MXNet to expose the optimizer (Module should have a get_optimizer method)
         return self.current_module._optimizer
 
-    def metric_output_names(self, is_train: bool = True) -> List[str]:
+    def metric_output_names(self,
+                            is_train: bool = True,
+                            is_reconstruction: bool = False) -> List[str]:
         """
         Returns the names of model outputs for metrics
         """
-        if self.reconstruction is not None and is_train:
+        if is_reconstruction:
             return [C.RECONSTRUCTION_SOFTMAX_OUTPUT_NAME]
         else:
             return [C.SOFTMAX_OUTPUT_NAME]
@@ -1268,9 +1293,13 @@ class EarlyStoppingTrainer:
         """
         # output_names refers to the list of outputs this metric should use to update itself, e.g. the softmax output
         if metric_name == C.ACCURACY:
-            return utils.Accuracy(ignore_label=C.PAD_ID, output_names=output_names)
+            return utils.Accuracy(name=metric_name, ignore_label=C.PAD_ID, output_names=output_names)
         elif metric_name == C.PERPLEXITY:
-            return mx.metric.Perplexity(ignore_label=C.PAD_ID, output_names=output_names)
+            return mx.metric.Perplexity(name=metric_name, ignore_label=C.PAD_ID, output_names=output_names)
+        elif metric_name == C.RECONSTRUCTION_PERPLEXITY:
+            return mx.metric.Perplexity(name=metric_name, ignore_label=C.PAD_ID, output_names=[C.RECONSTRUCTION_SOFTMAX_OUTPUT_NAME])
+        elif metric_name == C.TRANSLATION_PERPLEXITY:
+            return mx.metric.Perplexity(name=metric_name, ignore_label=C.PAD_ID, output_names=[C.SOFTMAX_OUTPUT_NAME])
         else:
             raise ValueError("unknown metric name")
 

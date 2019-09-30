@@ -824,7 +824,7 @@ def add_training_args(params):
     train_params.add_argument('--metrics',
                               nargs='+',
                               default=[C.PERPLEXITY],
-                              choices=[C.PERPLEXITY, C.ACCURACY],
+                              choices=[C.PERPLEXITY, C.ACCURACY, C.TRANSLATION_PERPLEXITY, C.RECONSTRUCTION_PERPLEXITY],
                               help='Names of metrics to track on training and validation data. Default: %(default)s.')
     train_params.add_argument('--optimized-metric',
                               default=C.PERPLEXITY,
