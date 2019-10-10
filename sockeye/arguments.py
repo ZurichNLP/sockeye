@@ -467,6 +467,12 @@ def add_vocab_args(params):
                         required=False,
                         default=None,
                         help='Existing target vocabulary (JSON).')
+    params.add_argument('--source-factor-vocabs',
+                        required=False,
+                        nargs='+',
+                        type=regular_file(),
+                        default=[],
+                        help='Existing source factor vocabulary (-ies) (JSON).')
     params.add_argument(C.VOCAB_ARG_SHARED_VOCAB,
                         action='store_true',
                         default=False,
@@ -483,6 +489,10 @@ def add_vocab_args(params):
                         type=multiple_values(num_values=2, greater_or_equal=1),
                         default=(1, 1),
                         help='Minimum frequency of words to be included in vocabularies. Default: %(default)s.')
+    params.add_argument('--pad-vocab-to-multiple-of',
+                        type=int,
+                        default=None,
+                        help='Pad vocabulary to a multiple of this integer. Default: %(default)s.')
 
 
 def add_model_parameters(params):
@@ -1175,6 +1185,10 @@ def add_inference_args(params):
                                type=int_greater_or_equal(1),
                                default=5,
                                help='Size of the beam. Default: %(default)s.')
+    decode_params.add_argument('--nbest-size',
+                               type=int_greater_or_equal(1),
+                               default=1,
+                               help='Size of the nbest list of translations. Default: %(default)s.')
     decode_params.add_argument('--beam-prune', '-p',
                                type=float,
                                default=0,

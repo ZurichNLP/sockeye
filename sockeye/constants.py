@@ -22,6 +22,8 @@ EOS_SYMBOL = "</s>"
 UNK_SYMBOL = "<unk>"
 PAD_SYMBOL = "<pad>"
 PAD_ID = 0
+PAD_FORMAT = "<pad%d>"
+
 TOKEN_SEPARATOR = " "
 VOCAB_SYMBOLS = [PAD_SYMBOL, UNK_SYMBOL, BOS_SYMBOL, EOS_SYMBOL]
 # reserve extra space for the EOS or BOS symbol that is added to both source and target
@@ -192,6 +194,7 @@ MONITOR_STAT_FUNCS = {STAT_FUNC_DEFAULT: None,
 
 # Inference constants
 DEFAULT_BEAM_SIZE = 5
+DEFAULT_NBEST_SIZE = 1
 CHUNK_SIZE_NO_BATCHING = 1
 CHUNK_SIZE_PER_BATCH_SEGMENT = 500
 BEAM_SEARCH_STOP_FIRST = 'first'
@@ -201,6 +204,7 @@ BEAM_SEARCH_STOP_ALL = 'all'
 JSON_TEXT_KEY = "text"
 JSON_FACTORS_KEY = "factors"
 JSON_CONSTRAINTS_KEY = "constraints"
+JSON_AVOID_KEY = "avoid"
 JSON_ENCODING = "utf-8"
 
 # Lexical constraints
@@ -323,18 +327,25 @@ OUTPUT_HANDLER_TRANSLATION = "translation"
 OUTPUT_HANDLER_TRANSLATION_WITH_SCORE = "translation_with_score"
 OUTPUT_HANDLER_TRANSLATION_WITH_ALIGNMENTS = "translation_with_alignments"
 OUTPUT_HANDLER_TRANSLATION_WITH_ALIGNMENT_MATRIX = "translation_with_alignment_matrix"
+OUTPUT_HANDLER_SCORE = "score"
+OUTPUT_HANDLER_PAIR_WITH_SCORE = "pair_with_score"
 OUTPUT_HANDLER_BENCHMARK = "benchmark"
 OUTPUT_HANDLER_ALIGN_PLOT = "align_plot"
 OUTPUT_HANDLER_ALIGN_TEXT = "align_text"
 OUTPUT_HANDLER_BEAM_STORE = "beam_store"
+OUTPUT_HANDLER_NBEST = "nbest_translation"
 OUTPUT_HANDLERS = [OUTPUT_HANDLER_TRANSLATION,
+                   OUTPUT_HANDLER_SCORE,
                    OUTPUT_HANDLER_TRANSLATION_WITH_SCORE,
                    OUTPUT_HANDLER_TRANSLATION_WITH_ALIGNMENTS,
                    OUTPUT_HANDLER_TRANSLATION_WITH_ALIGNMENT_MATRIX,
                    OUTPUT_HANDLER_BENCHMARK,
                    OUTPUT_HANDLER_ALIGN_PLOT,
                    OUTPUT_HANDLER_ALIGN_TEXT,
-                   OUTPUT_HANDLER_BEAM_STORE]
+                   OUTPUT_HANDLER_BEAM_STORE,
+                   OUTPUT_HANDLER_NBEST]
+OUTPUT_HANDLERS_SCORING = [OUTPUT_HANDLER_SCORE,
+                           OUTPUT_HANDLER_PAIR_WITH_SCORE]
 
 # metrics
 ACCURACY = 'accuracy'

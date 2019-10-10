@@ -54,9 +54,16 @@ def run_translate(args: argparse.Namespace):
     if args.checkpoints is not None:
         check_condition(len(args.checkpoints) == len(args.models), "must provide checkpoints for each model")
 
-    if args.beam_search_stop == C.BEAM_SEARCH_STOP_FIRST:
-        check_condition(args.batch_size == 1,
-                        "Early stopping (--beam-search-stop %s) not supported with batching" % (C.BEAM_SEARCH_STOP_FIRST))
+    if args.nbest_size > 1:
+        check_condition(args.beam_size >= args.nbest_size,
+                        "Size of nbest list (--nbest-size) must be smaller or equal to beam size (--beam-size).")
+        check_condition(args.beam_search_stop == C.BEAM_SEARCH_STOP_ALL,
+                        "--nbest-size > 1 requires beam search to only stop after all hypotheses are finished "
+                        "(--beam-search-stop all)")
+        if args.output_type != C.OUTPUT_HANDLER_NBEST:
+            logger.warning("For nbest translation, output handler must be '%s', overriding option --output-type.",
+                       C.OUTPUT_HANDLER_NBEST)
+            args.output_type = C.OUTPUT_HANDLER_NBEST
 
     log_basic_info(args)
 
@@ -96,6 +103,7 @@ def run_translate(args: argparse.Namespace):
                                                                                  args.length_penalty_beta),
                                           beam_prune=args.beam_prune,
                                           beam_search_stop=args.beam_search_stop,
+                                          nbest_size=args.nbest_size,
                                           models=models,
                                           source_vocabs=source_vocabs,
                                           target_vocab=target_vocab,

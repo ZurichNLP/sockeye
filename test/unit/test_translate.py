@@ -16,10 +16,10 @@ import unittest
 import unittest.mock
 from tempfile import TemporaryDirectory
 
+import sockeye.constants
 import sockeye.inference
 import sockeye.output_handler
 import sockeye.translate
-import sockeye.constants
 
 TEST_DATA = "Test file line 1\n" \
             "Test file line 2\n"
@@ -40,6 +40,10 @@ def test_translate_by_file():
     mock_translator.num_source_factors = 1
     mock_translator.batch_size = 1
 
+    mock_translator.nbest_size = 1
+    sockeye.translate.read_and_translate(translator=mock_translator, output_handler=mock_output_handler,
+                                         chunk_size=2, input_file='/dev/null', input_factors=None)
+
     with TemporaryDirectory() as temp:
         input_filename = os.path.join(temp, 'input')
         with open(input_filename, 'w') as f:
@@ -52,15 +56,14 @@ def test_translate_by_file():
         assert mock_translator.translate.call_count == 1
 
 
-
 @unittest.mock.patch("sys.stdin", io.StringIO(TEST_DATA))
 def test_translate_by_stdin_chunk2():
     mock_output_handler = unittest.mock.Mock(spec=sockeye.output_handler.OutputHandler)
     mock_translator = unittest.mock.Mock(spec=sockeye.inference.Translator)
-
     mock_translator.translate.return_value = ['', '']
     mock_translator.num_source_factors = 1
     mock_translator.batch_size = 1
+    mock_translator.nbest_size = 1
     sockeye.translate.read_and_translate(translator=mock_translator,
                                          output_handler=mock_output_handler,
                                          chunk_size=2)
