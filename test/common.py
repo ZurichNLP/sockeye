@@ -33,7 +33,7 @@ import sockeye.extract_parameters
 import sockeye.lexicon
 import sockeye.model
 import sockeye.prepare_data
-# import sockeye.score
+import sockeye.score
 import sockeye.train
 import sockeye.translate
 import sockeye.utils
@@ -418,8 +418,8 @@ def run_train_translate(train_params: str,
                 except ValueError:
                     score = output
                     translation = ""
-                print(translation, file=out_translate)
-                print(score, file=out_scores)
+                print(translation) #, file=out_translate)
+                print(score) #, file=out_scores)
 
         # Test target constraints
         if use_target_constraints:
@@ -499,66 +499,66 @@ def run_train_translate(train_params: str,
         # - scoring doesn't support skipping softmax (which can be enabled explicitly or implicitly by using a beam size of 1)
         # - translate splits up too-long sentences and translates them in sequence, invalidating the score, so skip that
         # - scoring requires valid translation output to compare against
-        # if not use_prepared_data \
-        #    and '--beam-size 1' not in translate_params \
-        #    and '--max-input-len' not in translate_params \
-        #    and translate_output_is_valid:
-        #
-        #     ## Score
-        #     # We use the translation parameters, but have to remove irrelevant arguments from it.
-        #     # Currently, the only relevant flag passed is the --softmax-temperature flag.
-        #     score_params = ''
-        #     if 'softmax-temperature' in translate_params:
-        #         params = translate_params.split(C.TOKEN_SEPARATOR)
-        #         for i, param in enumerate(params):
-        #             if param == '--softmax-temperature':
-        #                 score_params = '--softmax-temperature {}'.format(params[i + 1])
-        #                 break
-        #
-        #     scores_output_file = out_path + '.score'
-        #     params = "{} {} {}".format(sockeye.score.__file__,
-        #                                _SCORE_PARAMS_COMMON.format(model=model_path,
-        #                                                            source=test_source_path,
-        #                                                            target=out_path,
-        #                                                            output=scores_output_file),
-        #                                score_params)
-        #
-        #     if test_source_factor_paths is not None:
-        #         params += _SCORE_WITH_FACTORS_COMMON.format(source_factors=" ".join(test_source_factor_paths))
-        #
-        #     with patch.object(sys, "argv", params.split()):
-        #         sockeye.score.main()
-        #
-        #     # Compare scored output to original translation output. There are a few tricks: for blank source sentences,
-        #     # inference will report a score of -inf, so skip these. Second, we don't know if the scores include the
-        #     # generation of </s> and have had length normalization applied. So, skip all sentences that are as long
-        #     # as the maximum length, in order to safely exclude them.
-        #     with open(translate_score_path) as in_translate, open(out_path) as in_words, open(scores_output_file) as in_score:
-        #         model_config = sockeye.model.SockeyeModel.load_config(os.path.join(model_path, C.CONFIG_NAME))
-        #         max_len = model_config.config_data.max_seq_len_target
-        #
-        #         # Filter out sockeye.translate sentences that had -inf or were too long (which sockeye.score will have skipped)
-        #         translate_scores = []
-        #         translate_lens = []
-        #         score_scores = in_score.readlines()
-        #         for score, sent in zip(in_translate.readlines(), in_words.readlines()):
-        #             if score != '-inf\n' and len(sent.split()) < max_len:
-        #                 translate_scores.append(score)
-        #                 translate_lens.append(len(sent.split()))
-        #
-        #         assert len(translate_scores) == len(score_scores)
-        #
-        #         # Compare scores (using 0.002 which covers common noise comparing e.g., 1.234 and 1.235)
-        #         for translate_score, translate_len, score_score in zip(translate_scores, translate_lens, score_scores):
-        #             # Skip sentences that are close to the maximum length to avoid confusion about whether
-        #             # the length penalty was applied
-        #             if translate_len >= max_len - 2:
-        #                 continue
-        #
-        #             translate_score = float(translate_score)
-        #             score_score = float(score_score)
-        #
-        #             assert abs(translate_score - score_score) < 0.002
+        if not use_prepared_data \
+           and '--beam-size 1' not in translate_params \
+           and '--max-input-len' not in translate_params \
+           and translate_output_is_valid:
+
+            ## Score
+            # We use the translation parameters, but have to remove irrelevant arguments from it.
+            # Currently, the only relevant flag passed is the --softmax-temperature flag.
+            score_params = ''
+            if 'softmax-temperature' in translate_params:
+                params = translate_params.split(C.TOKEN_SEPARATOR)
+                for i, param in enumerate(params):
+                    if param == '--softmax-temperature':
+                        score_params = '--softmax-temperature {}'.format(params[i + 1])
+                        break
+
+            scores_output_file = out_path + '.score'
+            params = "{} {} {}".format(sockeye.score.__file__,
+                                       _SCORE_PARAMS_COMMON.format(model=model_path,
+                                                                   source=test_source_path,
+                                                                   target=out_path,
+                                                                   output=scores_output_file),
+                                       score_params)
+
+            if test_source_factor_paths is not None:
+                params += _SCORE_WITH_FACTORS_COMMON.format(source_factors=" ".join(test_source_factor_paths))
+
+            with patch.object(sys, "argv", params.split()):
+                sockeye.score.main()
+
+            # Compare scored output to original translation output. There are a few tricks: for blank source sentences,
+            # inference will report a score of -inf, so skip these. Second, we don't know if the scores include the
+            # generation of </s> and have had length normalization applied. So, skip all sentences that are as long
+            # as the maximum length, in order to safely exclude them.
+            with open(translate_score_path) as in_translate, open(out_path) as in_words, open(scores_output_file) as in_score:
+                model_config = sockeye.model.SockeyeModel.load_config(os.path.join(model_path, C.CONFIG_NAME))
+                max_len = model_config.config_data.max_seq_len_target
+
+                # Filter out sockeye.translate sentences that had -inf or were too long (which sockeye.score will have skipped)
+                translate_scores = []
+                translate_lens = []
+                score_scores = in_score.readlines()
+                for score, sent in zip(in_translate.readlines(), in_words.readlines()):
+                    if score != '-inf\n' and len(sent.split()) < max_len:
+                        translate_scores.append(score)
+                        translate_lens.append(len(sent.split()))
+
+                assert len(translate_scores) == len(score_scores)
+
+                # Compare scores (using 0.002 which covers common noise comparing e.g., 1.234 and 1.235)
+                for translate_score, translate_len, score_score in zip(translate_scores, translate_lens, score_scores):
+                    # Skip sentences that are close to the maximum length to avoid confusion about whether
+                    # the length penalty was applied
+                    if translate_len >= max_len - 2:
+                        continue
+
+                    translate_score = float(translate_score)
+                    score_score = float(score_score)
+
+                    assert abs(translate_score - score_score) < 0.002
 
         # Translate corpus with the 2nd params
         if translate_params_equiv is not None:
