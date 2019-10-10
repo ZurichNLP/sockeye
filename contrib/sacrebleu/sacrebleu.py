@@ -996,6 +996,27 @@ def compute_bleu(correct: List[int], total: List[int], sys_len: int, ref_len: in
     return BLEU._make([bleu, correct, total, precisions, brevity_penalty, sys_len, ref_len])
 
 
+def sentence_bleu(hypothesis: str,
+                  reference: str,
+                  smooth_floor: float = 0.01,
+                  use_effective_order: bool = True):
+    """
+    Computes BLEU on a single sentence pair.
+    Disclaimer: computing BLEU on the sentence level is not its intended use,
+    BLEU is a corpus-level metric.
+    :param hypothesis: Hypothesis string.
+    :param reference: Reference string.
+    :param smooth_floor: For 'floor' smoothing, the floor value to use.
+    :param use_effective_order: Account for references that are shorter than the largest n-gram.
+    :return: Returns a single BLEU score as a float.
+    """
+    bleu = corpus_bleu(hypothesis, reference,
+                       smooth='floor',
+                       smooth_floor=smooth_floor,
+                       use_effective_order=use_effective_order)
+    return bleu.score
+
+
 def corpus_bleu(sys_stream, ref_streams, smooth='exp', smooth_floor=0.0, force=False, lowercase=False,
                 tokenize=DEFAULT_TOKENIZER, use_effective_order=False) -> BLEU:
     """Produces BLEU scores along with its sufficient statistics from a source against one or more references.
