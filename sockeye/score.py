@@ -149,6 +149,12 @@ def score(args: argparse.Namespace):
                      output_handler=get_output_handler(output_type=args.output_type,
                                                        output_fname=args.output))
 
+        if args.max_seq_len is None:
+            max_seq_len_source = model_config.config_data.max_seq_len_source
+            max_seq_len_target = model_config.config_data.max_seq_len_target
+        else:
+            max_seq_len_source, max_seq_len_target = args.max_seq_len
+
         if config_data.data_statistics.num_discarded != 0:
             num_discarded = config_data.data_statistics.num_discarded
             logger.warning('Warning: %d %s longer than %s %s skipped. '
@@ -156,7 +162,7 @@ def score(args: argparse.Namespace):
                            'Increase the maximum length (--max-seq-len M:N) or trim your training data.',
                            num_discarded,
                            utils.inflect('sentence', num_discarded),
-                           args.max_seq_len,
+                           str((max_seq_len_source, max_seq_len_target)),
                            utils.inflect('was', num_discarded))
 
 

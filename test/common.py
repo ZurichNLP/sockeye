@@ -471,6 +471,14 @@ def run_train_translate(train_params: str,
 
             translate_output_is_valid = found_valid_output and not found_bad_tokens
 
+        with open(test_source_path) as source_fh:
+            print("sources:")
+            print(list(map(lambda x: x.rstrip(), source_fh.readlines())))
+
+        with open(out_path) as translations_fh:
+            print("translations:")
+            print(list(map(lambda x: x.rstrip(), translations_fh.readlines())))
+
         # Only run scoring under these conditions. Why?
         # - scoring isn't compatible with prepared data because that loses the source ordering
         # - scoring doesn't support skipping softmax (which can be enabled explicitly or implicitly by using a beam size of 1)
@@ -510,17 +518,19 @@ def run_train_translate(train_params: str,
             # inference will report a score of -inf, so skip these. Second, we don't know if the scores include the
             # generation of </s> and have had length normalization applied. So, skip all sentences that are as long
             # as the maximum length, in order to safely exclude them.
-            with open(translate_score_path) as in_translate, open(out_path) as in_words, open(scores_output_file) as in_score:
+            with open(translate_score_path) as in_translate, open(test_source_path) as in_source, open(out_path) as in_words, open(scores_output_file) as in_score:
                 model_config = sockeye.model.SockeyeModel.load_config(os.path.join(model_path, C.CONFIG_NAME))
-                max_len = model_config.config_data.max_seq_len_target
+
+                max_len_source = model_config.config_data.max_seq_len_source
+                max_len_target = model_config.config_data.max_seq_len_target
 
                 # Filter out sockeye.translate sentences that had -inf or were too long (which sockeye.score will have skipped)
                 translate_scores = []
                 translate_lens = []
                 score_scores = in_score.readlines()
 
-                for score, sent in zip(in_translate.readlines(), in_words.readlines()):
-                    if score != '-inf\n' and len(sent.split()) < max_len:
+                for source, score, sent in zip(in_source.readlines(), in_translate.readlines(), in_words.readlines()):
+                    if score != '-inf\n' and len(source.split()) < max_len_source and len(sent.split()) < max_len_target:
                         translate_scores.append(score)
                         translate_lens.append(len(sent.split()))
 
@@ -535,7 +545,7 @@ def run_train_translate(train_params: str,
                 for translate_score, translate_len, score_score in zip(translate_scores, translate_lens, score_scores):
                     # Skip sentences that are close to the maximum length to avoid confusion about whether
                     # the length penalty was applied
-                    if translate_len >= max_len - 2:
+                    if translate_len >= max_len_target - 2:
                         continue
 
                     translate_score = float(translate_score)

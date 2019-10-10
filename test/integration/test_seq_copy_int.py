@@ -12,7 +12,6 @@
 # permissions and limitations under the License.
 
 import pytest
-import random
 
 import sockeye.constants as C
 from test.common import run_train_translate, tmp_digits_dataset
