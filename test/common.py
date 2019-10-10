@@ -157,7 +157,6 @@ def tmp_digits_dataset(prefix: str,
                        sort_target: bool = False,
                        seed_train: int = 13, seed_dev: int = 13,
                        with_source_factors: bool = False,
-                       with_target_constraints: bool = False,
                        with_sentencepiece_model: bool = False):
     with TemporaryDirectory(prefix=prefix) as work_dir:
         # Simple digits files for train/dev data
@@ -191,28 +190,6 @@ def tmp_digits_dataset(prefix: str,
             data['train_source_factors'] = [train_factor_path]
             data['dev_source_factors'] = [dev_factor_path]
             data['test_source_factors'] = [test_factor_path]
-
-        if with_target_constraints:
-            # When using constrained decoding, rewrite the source file. Generating a mixture of
-            # sentences with and without constraints here is critical, since this can happen in production
-            # and also introduces sometimes some unanticipated interactions.
-            new_sources = []
-            for sentno, (source, target) in enumerate(zip(open(data['test_source']), open(data['test_target']))):
-                target_words = target.rstrip().split()
-                target_len = len(target_words)
-                source_len = len(source.rstrip().split())
-                new_source = { 'text': source.rstrip() }
-                # From the odd-numbered sentences that are not too long, create constraints. We do
-                # only odds to ensure we get batches with mixed constraints / lack of constraints.
-                if target_len > 0 and sentno % 2 == 0:
-                    start_pos = 0
-                    end_pos = min(target_len, 3)
-                    constraint = ' '.join(target_words[start_pos:end_pos])
-                    new_source['constraints'] = [constraint]
-                new_sources.append(json.dumps(new_source))
-            with open(data['test_source'], 'w') as out:
-                for json_line in new_sources:
-                    print(json_line, file=out)
 
         if with_sentencepiece_model:
             # assuming standard Sockeye vocab files
@@ -418,8 +395,8 @@ def run_train_translate(train_params: str,
                 except ValueError:
                     score = output
                     translation = ""
-                print(translation) #, file=out_translate)
-                print(score) #, file=out_scores)
+                print(translation, file=out_translate)
+                print(score, file=out_scores)
 
         # Test target constraints
         if use_target_constraints:
@@ -541,10 +518,16 @@ def run_train_translate(train_params: str,
                 translate_scores = []
                 translate_lens = []
                 score_scores = in_score.readlines()
+
                 for score, sent in zip(in_translate.readlines(), in_words.readlines()):
                     if score != '-inf\n' and len(sent.split()) < max_len:
                         translate_scores.append(score)
                         translate_lens.append(len(sent.split()))
+
+                print("score_scores:")
+                print(score_scores)
+                print("translate_scores:")
+                print(translate_scores)
 
                 assert len(translate_scores) == len(score_scores)
 
@@ -639,6 +622,7 @@ def run_train_translate(train_params: str,
             hypotheses = out.readlines()
         with open(test_target_path, "r") as ref:
             references = ref.readlines()
+
         assert len(hypotheses) == len(references)
 
         # compute metrics

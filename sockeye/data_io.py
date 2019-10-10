@@ -231,7 +231,10 @@ def calculate_length_statistics(source_iterables: Sequence[Iterable[Any]],
 
     num_sents = mean_and_variance.count
     mean = mean_and_variance.mean
-    std = math.sqrt(mean_and_variance.variance)
+    if not math.isnan(mean_and_variance.variance):
+        std = math.sqrt(mean_and_variance.variance)
+    else:
+        std = 0.0
     return LengthStatistics(num_sents, mean, std)
 
 
@@ -597,15 +600,18 @@ def prepare_data(source_fnames: List[str],
         version_out.write(str(C.PREPARED_DATA_VERSION))
 
 
-def get_data_statistics(source_readers: Sequence[Iterable],
+def get_data_statistics(source_readers: Optional[Sequence[Iterable]],
                         target_reader: Iterable,
                         buckets: List[Tuple[int, int]],
                         length_ratio_mean: float,
                         length_ratio_std: float,
-                        source_vocabs: List[vocab.Vocab],
+                        source_vocabs: Optional[List[vocab.Vocab]],
                         target_vocab: vocab.Vocab) -> 'DataStatistics':
-    data_stats_accumulator = DataStatisticsAccumulator(buckets, source_vocabs[0], target_vocab,
-                                                       length_ratio_mean, length_ratio_std)
+    data_stats_accumulator = DataStatisticsAccumulator(buckets,
+                                                       source_vocabs[0] if source_vocabs is not None else None,
+                                                       target_vocab,
+                                                       length_ratio_mean,
+                                                       length_ratio_std)
 
     if source_readers is not None and target_reader is not None:
         for sources, target in parallel_iter(source_readers, target_reader):
@@ -1416,13 +1422,13 @@ class ParallelDataSet(Sized):
                     source[bucket_idx] = np.concatenate((bucket_source, bucket_source.take(desired_indices_np)), axis=0)
                 else:
                     source[bucket_idx] = mx.nd.concat(bucket_source, bucket_source.take(desired_indices), dim=0)
-                    target[bucket_idx] = mx.nd.concat(bucket_target, bucket_target.take(desired_indices), dim=0)
-                    label[bucket_idx] = mx.nd.concat(bucket_label, bucket_label.take(desired_indices), dim=0)
+                target[bucket_idx] = mx.nd.concat(bucket_target, bucket_target.take(desired_indices), dim=0)
+                label[bucket_idx] = mx.nd.concat(bucket_label, bucket_label.take(desired_indices), dim=0)
 
-                    if policy == C.FILL_UP_ZEROS:
-                        source[bucket_idx][num_samples:, :, :] = C.PAD_ID
-                        target[bucket_idx][num_samples:, :] = C.PAD_ID
-                        label[bucket_idx][num_samples:, :] = C.PAD_ID
+                if policy == C.FILL_UP_ZEROS:
+                    source[bucket_idx][num_samples:, :, :] = C.PAD_ID
+                    target[bucket_idx][num_samples:, :] = C.PAD_ID
+                    label[bucket_idx][num_samples:, :] = C.PAD_ID
 
         return ParallelDataSet(source, target, label)
 

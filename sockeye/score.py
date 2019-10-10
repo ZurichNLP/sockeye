@@ -16,11 +16,8 @@ Simple Training CLI.
 """
 import argparse
 import os
-import sys
 from contextlib import ExitStack
-from typing import Any, cast, Optional, Dict, List, Tuple
-
-import mxnet as mx
+from typing import  Optional, List, Tuple
 
 from . import arguments
 from . import constants as C
@@ -28,12 +25,11 @@ from . import data_io
 from . import inference
 from . import model
 from . import scoring
-from . import train
 from . import utils
 from . import vocab
 from .log import setup_main_logger
-from .output_handler import get_output_handler, OutputHandler
-from .utils import check_condition, log_basic_info
+from .output_handler import get_output_handler
+from .utils import check_condition
 
 # Temporary logger, the real one (logging to a file probably, will be created in the main function)
 logger = setup_main_logger(__name__, file_logging=False, console=True)
@@ -88,7 +84,7 @@ def get_data_iters_and_vocabs(args: argparse.Namespace,
         validation_target=None,
         source_vocabs=source_vocabs,
         target_vocab=target_vocab,
-        source_vocab_paths=None,
+        source_vocab_paths=[None],
         target_vocab_path=None,
         shared_vocab=False,
         batch_size=args.batch_size,
@@ -150,7 +146,6 @@ def score(args: argparse.Namespace):
         scorer = scoring.Scorer(scoring_model, source_vocabs, target_vocab)
 
         scorer.score(score_iter=score_iter,
-                     score_type=args.score_type,
                      output_handler=get_output_handler(output_type=args.output_type,
                                                        output_fname=args.output))
 
