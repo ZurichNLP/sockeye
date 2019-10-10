@@ -420,6 +420,11 @@ DATA_CONFIG = "data.config"
 PREPARED_DATA_VERSION_FILE = "data.version"
 PREPARED_DATA_VERSION = 2
 
+# reranking
+RERANK_BLEU = "bleu"
+RERANK_CHRF = "chrf"
+RERANK_METRICS = [RERANK_BLEU, RERANK_CHRF]
+
 # reconstruction
 MONOLINGUAL = "monolingual"
 BILINGUAL = "bilingual"
