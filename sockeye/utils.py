@@ -530,7 +530,7 @@ def _expand_requested_device_ids(requested_device_ids: List[int], num_gpus_avail
 
     num_arbitrary_device_ids = 0
     device_ids = []
-    for device_id in [requested_device_ids]:
+    for device_id in requested_device_ids:
         if device_id < 0:
             num_gpus = -device_id
             num_arbitrary_device_ids += num_gpus
