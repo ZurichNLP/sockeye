@@ -389,29 +389,12 @@ def test_topk_func(batch_size, beam_size, target_vocab_size):
     # offset for batch sizes > 1
     offset = mx.nd.array(np.repeat(np.arange(0, batch_size * beam_size, beam_size), beam_size), dtype='int32')
 
-    np_hyp, np_word, np_values = sockeye.utils.topk(scores, k=beam_size,
+    np_hyp, np_word, np_values = sockeye.utils.topk(scores, k=beam_size, batch_size=batch_size,
                                                     offset=offset, use_mxnet_topk=False)
     np_hyp, np_word, np_values = np_hyp.asnumpy(), np_word.asnumpy(), np_values.asnumpy()
 
-    mx_hyp, mx_word, mx_values = sockeye.utils.topk(scores, k=beam_size,
+    mx_hyp, mx_word, mx_values = sockeye.utils.topk(scores, k=beam_size, batch_size=batch_size,
                                                     offset=offset, use_mxnet_topk=True)
-    mx_hyp, mx_word, mx_values = mx_hyp.asnumpy(), mx_word.asnumpy(), mx_values.asnumpy()
-    assert all(mx_hyp == np_hyp)
-    assert all(mx_word == np_word)
-    assert all(mx_values == np_values)
-
-    topk = sockeye.inference.TopK(k=beam_size, batch_size=batch_size, vocab_size=target_vocab_size)
-    topk.initialize()
-    assert all(topk.offset.data() == offset)
-
-    mx_hyp, mx_word, mx_values = topk(scores)
-    mx_hyp, mx_word, mx_values = mx_hyp.asnumpy(), mx_word.asnumpy(), mx_values.asnumpy()
-    assert all(mx_hyp == np_hyp)
-    assert all(mx_word == np_word)
-    assert all(mx_values == np_values)
-
-    topk.hybridize()
-    mx_hyp, mx_word, mx_values = topk(scores)
     mx_hyp, mx_word, mx_values = mx_hyp.asnumpy(), mx_word.asnumpy(), mx_values.asnumpy()
     assert all(mx_hyp == np_hyp)
     assert all(mx_word == np_word)

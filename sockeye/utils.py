@@ -253,25 +253,28 @@ class OnlineMeanAndVariance:
 
 def topk(scores: mx.nd.NDArray,
          k: int,
+         batch_size: int,
          offset: mx.nd.NDArray,
          use_mxnet_topk: bool) -> Tuple[mx.nd.NDArray, mx.nd.NDArray, mx.nd.NDArray]:
     """
     Get the lowest k elements per sentence from a `scores` matrix.
     :param scores: Vocabulary scores for the next beam step. (batch_size * beam_size, target_vocabulary_size)
     :param k: The number of smallest scores to return.
+    :param batch_size: Number of sentences being decoded at once.
     :param offset: Array to add to the hypothesis indices for offsetting in batch decoding.
     :param use_mxnet_topk: True to use the mxnet implementation or False to use the numpy one.
     :return: The row indices, column indices and values of the k smallest items in matrix.
     """
     # (batch_size, beam_size * target_vocab_size)
-    folded_scores = scores.reshape((-1, k * scores.shape[-1]))
-    batch_size = folded_scores.shape[0]
+    folded_scores = scores.reshape((batch_size, k * scores.shape[-1]))
 
     if use_mxnet_topk:
         # pylint: disable=unbalanced-tuple-unpacking
         values, indices = mx.nd.topk(folded_scores, axis=1, k=k, ret_typ='both', is_ascend=True)
-        indices = mx.nd.cast(indices, 'int32').reshape((-1,))
-        best_hyp_indices, best_word_indices = mx.nd.unravel_index(indices, scores.shape)
+        best_hyp_indices, best_word_indices = mx.nd.array(np.unravel_index(indices.astype(np.int32).asnumpy().ravel(),
+                                                                           scores.shape),
+                                                          dtype='int32',
+                                                          ctx=scores.context)
 
     else:
         folded_scores = folded_scores.asnumpy()
