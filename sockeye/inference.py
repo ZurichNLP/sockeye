@@ -488,6 +488,10 @@ def models_max_input_output_length(models: List[InferenceModel],
     :param forced_max_output_len: An optional overwrite of the maximum output length.
     :return: The maximum input length and a function to get the output length given the input length.
     """
+    logging.info("MODELS_MAX_INPUT_OUTPUT_LENGTH num_stds: %d" % num_stds)
+    logging.info("MODELS_MAX_INPUT_OUTPUT_LENGTH forced_max_input_len: %d" % forced_max_input_len)
+    logging.info("MODELS_MAX_INPUT_OUTPUT_LENGTH forced_max_output_len: %d" % forced_max_output_len)
+
     max_mean = max(model.length_ratio_mean for model in models)
     max_std = max(model.length_ratio_std for model in models)
 
@@ -498,6 +502,13 @@ def models_max_input_output_length(models: List[InferenceModel],
                                         if model.max_supported_seq_len_target is not None),
                                        default=None)
     training_max_seq_len_source = min(model.training_max_seq_len_source for model in models)
+
+    logging.info("MODELS_MAX_INPUT_OUTPUT_LENGTH max_mean: %f" % max_mean)
+    logging.info("MODELS_MAX_INPUT_OUTPUT_LENGTH max_std: %f" % max_std)
+
+    logging.info("MODELS_MAX_INPUT_OUTPUT_LENGTH supported_max_seq_len_source: %d" % supported_max_seq_len_source)
+    logging.info("MODELS_MAX_INPUT_OUTPUT_LENGTH supported_max_seq_len_target: %d" % supported_max_seq_len_target)
+    logging.info("MODELS_MAX_INPUT_OUTPUT_LENGTH training_max_seq_len_source: %d" % training_max_seq_len_source)
 
     return get_max_input_output_length(supported_max_seq_len_source,
                                        supported_max_seq_len_target,
