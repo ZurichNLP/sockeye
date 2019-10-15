@@ -1623,6 +1623,8 @@ class Translator:
         # Maximum output length
         max_output_length = self.models[0].get_max_output_length(source_length)
 
+        logging.info("BEAM SEARCH max_output_length: %d" % max_output_length)
+
         # General data structure: each row has batch_size * beam blocks for the 1st sentence, with a full beam,
         # then the next block for the 2nd sentence and so on
 
