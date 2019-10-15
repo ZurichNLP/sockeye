@@ -2094,7 +2094,7 @@ class NormalizeAndUpdateFinished(mx.gluon.HybridBlock):
         all_finished = F.broadcast_logical_or(best_word_indices == self.pad_id, best_word_indices == self.eos_id)
         newly_finished = F.broadcast_logical_xor(all_finished, finished)
         scores_accumulated = F.where(newly_finished,
-                                     scores_accumulated / self.length_penalty(lengths),
+                                     scores_accumulated / self.length_penalty(lengths + 1),
                                      scores_accumulated)
 
         # Update lengths of all items, except those that were already finished. This updates
