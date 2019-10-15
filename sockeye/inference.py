@@ -859,6 +859,12 @@ class NBestTranslations:
         self.attention_matrices = attention_matrices
         self.scores = scores
 
+    def __repr__(self):
+        return "NBestTranslations(target_ids_list=%s, scores=%s)" % (self.target_ids_list, self.scores)
+
+    def __str__(self):
+        return "NBestTranslations(target_ids_list=%s, scores=%s)" % (self.target_ids_list, self.scores)
+
 
 class Translation:
     __slots__ = ('target_ids',
@@ -878,6 +884,16 @@ class Translation:
         self.score = score
         self.beam_histories = beam_histories if beam_histories is not None else []
         self.nbest_translations = nbest_translations
+
+    def __repr__(self):
+        return "Translation(target_ids=%s, score=%s, nbest_translations=%s)" % (self.target_ids,
+                                                                                self.score,
+                                                                                str(self.nbest_translations))
+
+    def __str__(self):
+        return "Translation(target_ids=%s, score=%s, nbest_translations=%s)" % (self.target_ids,
+                                                                                self.score,
+                                                                                str(self.nbest_translations))
 
 
 def empty_translation(add_nbest: bool = False) -> Translation:
@@ -1827,6 +1843,13 @@ class Translator:
         scores_accumulated = scores_accumulated.take(best_hyp_indices)
         constraints = [constraints[x] for x in best_hyp_indices.asnumpy()]
 
+        self._log_beam(t,
+                       best_hyp_indices,
+                       best_word_indices,
+                       lengths,
+                       scores_accumulated,
+                       "BEAM SEARCH AFTER FINAL NORMALIZATION")
+
         all_best_hyp_indices = mx.nd.stack(*best_hyp_indices_list, axis=1)
         all_best_word_indices = mx.nd.stack(*best_word_indices_list, axis=1)
         all_attentions = mx.nd.stack(*attentions, axis=1)
@@ -1845,10 +1868,14 @@ class Translator:
                   best_hyp_indices,
                   best_word_indices,
                   lengths,
-                  scores_accumulated):
+                  scores_accumulated,
+                  msg: str = None):
 
         logging.info("-" * 50)
-        logging.info("BEAM SEARCH TIME STEP: %d" % time_step)
+        if msg is not None:
+            logging.info(msg)
+        else:
+            logging.info("BEAM SEARCH TIME STEP: %d" % time_step)
 
         names = ["best_hyp_indices", "best_word_indices", "lengths", "scores_accumulated"]
         arrays = [best_hyp_indices, best_word_indices, lengths, scores_accumulated]
@@ -1905,6 +1932,11 @@ class Translator:
                                                                                    histories)])
         # reorder and regroup lists
         reduced_translations = [_reduce_nbest_translations(grouped_nbest) for grouped_nbest in zip(*nbest_translations)]
+
+        logging.info("-" * 50)
+        for translation in reduced_translations:
+            logging.info(translation)
+
         return reduced_translations
 
     @staticmethod
