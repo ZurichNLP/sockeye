@@ -1813,6 +1813,12 @@ class Translator:
             best_word_indices_list.append(best_word_indices)
             attentions.append(attention_scores)
 
+            self._log_beam(t,
+                           best_hyp_indices,
+                           best_word_indices,
+                           lengths,
+                           scores_accumulated)
+
             if self.beam_search_stop == C.BEAM_SEARCH_STOP_FIRST:
                 at_least_one_finished = finished.reshape((self.batch_size, self.beam_size)).sum(axis=1) > 0
                 if at_least_one_finished.sum().asscalar() == self.batch_size:
@@ -1825,11 +1831,6 @@ class Translator:
             for ms in model_states:
                 ms.sort_state(best_hyp_indices)
 
-            self._log_beam(t,
-                           best_hyp_indices,
-                           best_word_indices,
-                           lengths,
-                           scores_accumulated)
 
         logger.debug("Finished after %d / %d steps.", t + 1, max_output_length)
 
