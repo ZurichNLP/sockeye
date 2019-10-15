@@ -1624,7 +1624,7 @@ class Translator:
         max_output_length = self.models[0].get_max_output_length(source_length)
 
         logging.info("BEAM SEARCH max_output_length: %d" % max_output_length)
-        logging.info("BEAM SEARCH max_output_lengths: %d" % str(max_output_lengths.asnumpy()))
+        logging.info("BEAM SEARCH max_output_lengths: %s" % str(max_output_lengths.asnumpy()))
         logging.info("BEAM SEARCH EOS_ID: %d" % self.vocab_target[C.EOS_SYMBOL])
 
         # General data structure: each row has batch_size * beam blocks for the 1st sentence, with a full beam,
