@@ -1624,6 +1624,7 @@ class Translator:
         max_output_length = self.models[0].get_max_output_length(source_length)
 
         logging.info("BEAM SEARCH max_output_length: %d" % max_output_length)
+        logging.info("BEAM SEARCH EOS_ID: %d" % self.vocab_target[C.EOS_SYMBOL])
 
         # General data structure: each row has batch_size * beam blocks for the 1st sentence, with a full beam,
         # then the next block for the 2nd sentence and so on
@@ -1819,7 +1820,9 @@ class Translator:
                            best_hyp_indices,
                            best_word_indices,
                            lengths,
-                           scores_accumulated)
+                           scores_accumulated,
+                           finished,
+                           inactive)
 
             if self.beam_search_stop == C.BEAM_SEARCH_STOP_FIRST:
                 at_least_one_finished = finished.reshape((self.batch_size, self.beam_size)).sum(axis=1) > 0
@@ -1851,6 +1854,8 @@ class Translator:
                        best_word_indices,
                        lengths,
                        scores_accumulated,
+                       finished,
+                       inactive,
                        "BEAM SEARCH AFTER FINAL NORMALIZATION")
 
         all_best_hyp_indices = mx.nd.stack(*best_hyp_indices_list, axis=1)
@@ -1872,6 +1877,8 @@ class Translator:
                   best_word_indices,
                   lengths,
                   scores_accumulated,
+                  finished,
+                  inactive,
                   msg: str = None):
 
         logging.info("-" * 50)
@@ -1880,8 +1887,8 @@ class Translator:
         else:
             logging.info("BEAM SEARCH TIME STEP: %d" % time_step)
 
-        names = ["best_hyp_indices", "best_word_indices", "lengths", "scores_accumulated"]
-        arrays = [best_hyp_indices, best_word_indices, lengths, scores_accumulated]
+        names = ["best_hyp_indices", "best_word_indices", "lengths", "scores_accumulated", "finished", "inactive"]
+        arrays = [best_hyp_indices, best_word_indices, lengths, scores_accumulated, finished, inactive]
 
         for array, name in zip(arrays, names):
             logging.info("%s:" % name)
