@@ -1809,6 +1809,12 @@ class Translator:
             for ms in model_states:
                 ms.sort_state(best_hyp_indices)
 
+            self._log_beam(t,
+                           best_hyp_indices,
+                           best_word_indices,
+                           lengths,
+                           scores_accumulated)
+
         logger.debug("Finished after %d / %d steps.", t + 1, max_output_length)
 
         # (9) Sort the hypotheses within each sentence (normalization for finished hyps may have unsorted them).
@@ -1832,6 +1838,25 @@ class Translator:
                lengths.asnumpy().astype('int32'), \
                constraints, \
                beam_histories
+
+
+    def _log_beam(self,
+                  time_step: int,
+                  best_hyp_indices,
+                  best_word_indices,
+                  lengths,
+                  scores_accumulated):
+
+        logging.info("-" * 50)
+        logging.info("BEAM SEARCH TIME STEP: %d" % time_step)
+
+        names = ["best_hyp_indices", "best_word_indices", "lengths", "scores_accumulated"]
+        arrays = [best_hyp_indices, best_word_indices, lengths, scores_accumulated]
+
+        for array, name in zip(arrays, names):
+            logging.info("%s:" % name)
+            logging.info(str(array.asnumpy()))
+
 
     def _get_best_from_beam(self,
                             best_hyp_indices: np.ndarray,
