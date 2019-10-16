@@ -188,6 +188,11 @@ def check_resume(args: argparse.Namespace, output_folder: str) -> bool:
                 if old_effective_batch_size == new_effective_batch_size:
                     arg_diffs.discard('batch_size')
                     arg_diffs.discard('update_interval')
+            # allow differing source_factor_vocabs and pad_vocab_to_multiple_of if they are not set explicitly in the new args
+            if 'pad_vocab_to_multiple_of' in arg_diffs and args.pad_vocab_to_multiple_of is None:
+                arg_diffs.discard('pad_vocab_to_multiple_of')
+            if 'source_factor_vocabs' in arg_diffs and args.source_factor_vocabs == []:
+                arg_diffs.discard('source_factor_vocabs')
             if not arg_diffs:
                 resume_training = True
             else:
