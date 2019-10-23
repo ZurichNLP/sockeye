@@ -134,11 +134,7 @@ def check_arg_compatibility(args: argparse.Namespace):
             check_condition(args.source == args.target,
                             "Source and target side of the training data must be the same for reconstructing "
                             "the monolingual data: %s vs. %s" % (args.source, args.target))
-        if not args.weight_tying or args.weight_tying_type != C.WEIGHT_TYING_SRC_TRG_SOFTMAX:
-            logger.info("Source embeddings, target embeddings and the target softmax weight matrix "
-                        "will be tied when training bidirectional NMT models with reconstruction.")
-            args.weight_tying = True
-            args.weight_tying_type = C.WEIGHT_TYING_SRC_TRG_SOFTMAX
+
     check_condition(not (args.decoder_only and args.reconstruction is not None),
                     "Pre-training the decoder and training the reconstruction model are mutually exclusive.")
 
