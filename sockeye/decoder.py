@@ -216,6 +216,7 @@ class Decoder(ABC):
                                instantiate_hidden: str,
                                output_layer: layers.OutputLayer,
                                embedding_target: encoder.Embedding,
+                               embedding_source: encoder.Embedding,
                                softmax_temperature: float = 1.0,
                                gumbel_noise_scale: float = 1.0):
         """
@@ -224,6 +225,7 @@ class Decoder(ABC):
         self.instantiate_hidden = instantiate_hidden
         self.output_layer = output_layer
         self.embedding_target = embedding_target
+        self.embedding_source = embedding_source
         self.softmax_temperature = softmax_temperature
         self.gumbel_noise_scale = gumbel_noise_scale
 
@@ -375,7 +377,7 @@ class TransformerDecoder(Decoder):
                         # word_prev_prediction: (batch_size, 1)
                         word_prev_prediction = mx.sym.argmax(logits, axis=1, keepdims=True)
                         # word_vec_prev_prediction: (batch_size, 1, decoder_depth)
-                        word_vec_prev_prediction, _, _ = self.embedding_target.encode(data=word_prev_prediction,
+                        word_vec_prev_prediction, _, _ = self.embedding_source.encode(data=word_prev_prediction,
                                                                                       data_length=None,
                                                                                       seq_len=1)
                         # word_vec_prev_prediction: (batch_size, decoder_depth)
@@ -388,7 +390,7 @@ class TransformerDecoder(Decoder):
                         # word_prev_prediction: (batch_size, 1)
                         word_prev_prediction = mx.sym.sample_multinomial(word_prev_dist, shape=1)
                         # word_vec_prev_prediction: (batch_size, 1, decoder_depth)
-                        word_vec_prev_prediction, _, _ = self.embedding_target.encode(data=word_prev_prediction,
+                        word_vec_prev_prediction, _, _ = self.embedding_source.encode(data=word_prev_prediction,
                                                                                       data_length=None,
                                                                                       seq_len=1)
                         # word_vec_prev_prediction: (batch_size, decoder_depth)
@@ -399,25 +401,25 @@ class TransformerDecoder(Decoder):
                         # word_prev_dist: (batch_size, vocab_size)
                         word_prev_dist = mx.sym.softmax(logits, axis=1)
                         # word_vec_prev_prediction: (batch_size, decoder_depth)
-                        word_vec_prev_prediction = mx.sym.dot(word_prev_dist, self.embedding_target.embed_weight)
+                        word_vec_prev_prediction = mx.sym.dot(word_prev_dist, self.embedding_source.embed_weight)
                     elif self.instantiate_hidden == C.ST_SOFTMAX_NAME:
                         # word_prev_dist: (batch_size, vocab_size)
                         word_prev_dist = utils.gumbel_softmax(logits, temperature=self.softmax_temperature,
                                                               noise_scale=0, st=True, axis=1)
                         # word_vec_prev_prediction: (batch_size, decoder_depth)
-                        word_vec_prev_prediction = mx.sym.dot(word_prev_dist, self.embedding_target.embed_weight)
+                        word_vec_prev_prediction = mx.sym.dot(word_prev_dist, self.embedding_source.embed_weight)
                     elif self.instantiate_hidden == C.GUMBEL_SOFTMAX_NAME:
                         # word_prev_dist: (batch_size, vocab_size)
                         word_prev_dist = utils.gumbel_softmax(logits, temperature=self.softmax_temperature,
                                                               noise_scale=self.gumbel_noise_scale, axis=1)
                         # word_vec_prev_prediction: (batch_size, decoder_depth)
-                        word_vec_prev_prediction = mx.sym.dot(word_prev_dist, self.embedding_target.embed_weight)
+                        word_vec_prev_prediction = mx.sym.dot(word_prev_dist, self.embedding_source.embed_weight)
                     elif self.instantiate_hidden == C.ST_GUMBEL_SOFTMAX_NAME:
                         # word_prev_dist: (batch_size, vocab_size)
                         word_prev_dist = utils.gumbel_softmax(logits, temperature=self.softmax_temperature,
                                                               noise_scale=self.gumbel_noise_scale, st=True, axis=1)
                         # word_vec_prev_prediction: (batch_size, decoder_depth)
-                        word_vec_prev_prediction = mx.sym.dot(word_prev_dist, self.embedding_target.embed_weight)
+                        word_vec_prev_prediction = mx.sym.dot(word_prev_dist, self.embedding_source.embed_weight)
 
             if self.decode_sequence_as_instantiated_hidden:
                 targets.append(word_vec_prev_prediction)

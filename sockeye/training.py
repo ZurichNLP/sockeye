@@ -125,6 +125,7 @@ class TrainingModel(model.SockeyeModel):
             self.decoder.set_instantiate_hidden(instantiate_hidden=self.instantiate_hidden,
                                                 output_layer=self.output_layer,
                                                 embedding_target=self.embedding_target,
+                                                embedding_source=self.embedding_source,
                                                 softmax_temperature=self.config.softmax_temperature,
                                                 gumbel_noise_scale=self.config.gumbel_noise_scale)
 
