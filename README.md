@@ -6,6 +6,8 @@
 [![Build Status](https://travis-ci.org/awslabs/sockeye.svg?branch=master)](https://travis-ci.org/awslabs/sockeye)
 [![Documentation Status](https://readthedocs.org/projects/sockeye/badge/?version=latest)](http://sockeye.readthedocs.io/en/latest/?badge=latest)
 
+----------------------------
+
 # NOTE
 
 This older codebase was updated with a number of standard features present in newer versions of Sockeye, such as:
@@ -14,7 +16,11 @@ This older codebase was updated with a number of standard features present in ne
 - scoring
 - nbest translation
 
-The code for those features is *not* our work, but an adaptation of existing newer commits to https://github.com/awslabs/sockeye.
+The code for those features is **not** our work, but an adaptation of existing newer commits to https://github.com/awslabs/sockeye.
+
+Additionally, our code builds on a Sockeye version by Niu et al: http://xingniu.org/pub/reconstruction_naacl19.pdf for the paper and https://github.com/xingniu/sockeye/tree/naacl2019 for the codebase.
+
+----------------------------
 
 This package contains the Sockeye project,
 a sequence-to-sequence framework for Neural Machine Translation based on Apache MXNet Incubating.
