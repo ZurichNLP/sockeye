@@ -402,7 +402,8 @@ def encode(inputs: List[Input],
                 encoder_states[0]=batches
             encoder_states = [state.asnumpy() for state in encoder_states]
             #print(encoder_states[0].shape, len(encoder_states))
-            encoded_sequences.extend(encoder_states) # list of batches [batch, batch]
+            ## important: need to make a copy here, previous output will change with next batch!
+            encoded_sequences.append(encoder_states[0].copy()) # list of batches [batch, batch]
         #print("len encoded seq ", len(encoded_sequences))
         return encoded_sequences # len(encoded_sequences)= number of batches
     
@@ -784,6 +785,10 @@ def main():
                         action='store_true',
                         default=False,
                         help='Print distribution of labels for each class. Default: %(default)s.')
+    parser.add_argument('--max-train-size',
+                       type=int,
+                        default=250000,
+                        help='Maximum number of samples for training. Default: %(default)s.')
     
     args = parser.parse_args()
     
@@ -852,8 +857,8 @@ def main():
 
     
     logger.info("train classifier")
-    # limit size of train set to 250k
-    cutoff=250000
+    # limit size of train set to --max-train-size
+    cutoff=args.max_train_size
     if len(labels) > cutoff:
         (encoded_tokens, rest) = np.split(encoded_tokens, [cutoff])
         (labels, rest) = np.split(labels, [cutoff])
