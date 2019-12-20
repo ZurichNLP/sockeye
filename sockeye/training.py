@@ -499,10 +499,11 @@ class CosineEncoderModel(TrainingModel):
         source_words = source.split(num_outputs=self.config.config_embed_source.num_factors,
                                     axis=2, squeeze_axis=True)[0]
         source_length = utils.compute_lengths(source_words)
-        source_labels = mx.sym.reshape(data=source_words, shape=(-1,), name=C.SOURCE_LABEL_NAME)
+        source_labels = mx.sym.reshape(data=source_words, shape=(-1,), name=C.COS_SOURCE_LABEL_NAME)
         target = mx.sym.Variable(C.TARGET_NAME)
         target_length = utils.compute_lengths(target)
         labels = mx.sym.reshape(data=mx.sym.Variable(C.TARGET_LABEL_NAME), shape=(-1,))
+        target_labels = mx.sym.reshape(data=target, shape=(-1,), name=C.COS_TARGET_LABEL_NAME)
 
         self.model_loss = loss.get_loss(self.config.config_loss)
         self.cosine_loss = loss.get_loss(self.config.cosine_loss)
@@ -563,7 +564,7 @@ class CosineEncoderModel(TrainingModel):
             logits = self.output_layer(target_decoded)
 
             loss_output = self.model_loss.get_loss(logits, labels, grad_scale=1.0-self._cosine_lambda)
-            loss_cosine = self.cosine_loss.get_loss(source_encoded, source_labels, source_encoded_seq_len, trg_encoded, labels, trg_encoded_seq_len, grad_scale=self._cosine_lambda)
+            loss_cosine = self.cosine_loss.get_loss(source_encoded, source_labels, source_encoded_seq_len, trg_encoded, target_labels, trg_encoded_seq_len, grad_scale=self._cosine_lambda)
             combined_loss = loss_output + loss_cosine
 
             return mx.sym.Group(combined_loss), data_names, label_names
