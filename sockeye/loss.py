@@ -279,7 +279,9 @@ class AttentionMonotonicity(Loss):
         p = mx.sym.ones_like(attention_scores) ## (batch_size, target_length, max_source_length)
         
         #positions = mx.sym.arange(start=1, step=1, repeat=1, infer_range=True) # should be stop=source_length TODO?
-        positions = mx.sym.arange(start=1, step=1, repeat=1, stop=max_source_length) # should be stop=source_length TODO?
+        positions = mx.sym.arange(start=1, step=1, repeat=1, stop=max_source_length+1) # should be stop=source_length TODO?
+        #positions = mx.sym.expand_dims(positions, axis=0)
+        #positions = mx.sym.expand_dims(positions, axis=0)
         positions = positions.reshape(shape=(1,1, max_source_length))  # (1, 1, source_length)
         positions = mx.sym.broadcast_mul(p, positions) # shape(batch, target_length, source_length), values in source_length = arange(source_length) 
         
@@ -304,7 +306,6 @@ class AttentionMonotonicity(Loss):
         greater_than_zero = mx.sym.broadcast_greater_equal(adjacent_pos_difference, mx.sym.zeros(shape=(1,))) # 1 if avg>0, 0 otherwise shape (batch, target_length)
         adjacent_pos_difference  = adjacent_pos_difference * greater_than_zero # (batch, target_length): target_length = 0 or diff attention score (y-(y+1))
         layer_loss = mx.sym.mean(adjacent_pos_difference, axis=1) # (batch, )
-        
         return layer_loss
 
     def create_metric(self) -> "AttentionMonotonicityMetric":
