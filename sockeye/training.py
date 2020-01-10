@@ -149,7 +149,7 @@ class TrainingModel(model.SockeyeModel):
             # decoder
             # target_decoded: (batch-size, target_len, decoder_depth)
             # pointer_scores: (batch-size, target_seq_len, source_seq_len)
-            target_decoded, pointer_scores = self.decoder.decode_sequence(source_encoded, source_encoded_length, source_encoded_seq_len,
+            target_decoded, pointer_scores, probs = self.decoder.decode_sequence(source_encoded, source_encoded_length, source_encoded_seq_len,
                                                           target_embed, target_embed_length, target_embed_seq_len)
 
             # target_decoded: (batch_size * target_seq_len, decoder_depth)
@@ -475,6 +475,194 @@ class TrainingModel(model.SockeyeModel):
     @property
     def monitor(self) -> Optional[mx.monitor.Monitor]:
         return self._monitor
+
+class MonotoneAttentionModel(TrainingModel):
+    """
+    MonotoneAttentionModel is a SockeyeModel that enforeces monotone attention with an additional loss.
+
+    :param config: Configuration object holding details about the model.
+    :param context: The context(s) that MXNet will be run in (GPU(s)/CPU).
+    :param output_dir: Directory where this model is stored.
+    :param provide_data: List of input data descriptions.
+    :param provide_label: List of label descriptions.
+    :param default_bucket_key: Default bucket key.
+    :param bucketing: If True bucketing will be used, if False the computation graph will always be
+            unrolled to the full length.
+    :param gradient_compression_params: Optional dictionary of gradient compression parameters.
+    :param gradient_accumulation: Whether to accumulate gradients over batches. Default: False.
+    :param fixed_param_names: Optional list of params to fix during training (i.e. their values will not be trained).
+    :param fixed_param_strategy: Optional string indicating a named strategy for fixing parameters.
+    """
+    def __init__(self,
+                 config: model.ModelConfig,
+                 context: List[mx.context.Context],
+                 output_dir: str,
+                 provide_data: List[mx.io.DataDesc],
+                 provide_label: List[mx.io.DataDesc],
+                 default_bucket_key: Tuple[int, int],
+                 bucketing: bool,
+                 gradient_compression_params: Optional[Dict[str, Any]] = None,
+                 gradient_accumulation: bool = False,
+                 fixed_param_names: Optional[List[str]] = None,
+                 fixed_param_strategy: Optional[str] = None) -> None:
+        model.SockeyeModel.__init__(self, config=config)
+        self.context = context
+        self.output_dir = output_dir
+        self.fixed_param_names = fixed_param_names
+        self.fixed_param_strategy = fixed_param_strategy
+        self._bucketing = bucketing
+        self._gradient_compression_params = gradient_compression_params
+        self._gradient_accumulation = gradient_accumulation
+        self._initialize(provide_data, provide_label, default_bucket_key)
+        self._monitor = None  # type: Optional[mx.monitor.Monitor]
+
+    def _initialize(self,
+                    provide_data: List[mx.io.DataDesc],
+                    provide_label: List[mx.io.DataDesc],
+                    default_bucket_key: Tuple[int, int]):
+        """
+        Initializes model components, creates training symbol and module, and binds it.
+        """
+        source = mx.sym.Variable(C.SOURCE_NAME)
+        source_words = source.split(num_outputs=self.config.config_embed_source.num_factors,
+                                    axis=2, squeeze_axis=True)[0]
+        source_length = utils.compute_lengths(source_words)
+        target = mx.sym.Variable(C.TARGET_NAME)
+        target_length = utils.compute_lengths(target)
+        labels = mx.sym.reshape(data=mx.sym.Variable(C.TARGET_LABEL_NAME), shape=(-1,))
+
+        self.model_loss = loss.get_loss(self.config.config_loss)
+        logger.info("Using model loss: %s", self.model_loss)
+        if self.config.config_length_task_loss is not None:
+            self.length_task_loss = loss.get_length_task_loss(self.config.config_length_task_loss)
+            logger.info("Using length task loss: %s", self.length_task_loss)
+        else:
+            self.length_task_loss = None
+        
+        self.attention_monotonicity_loss = loss.get_loss(self.config.attention_monotonicity_loss)
+
+        data_names = [C.SOURCE_NAME, C.TARGET_NAME]
+        label_names = [C.TARGET_LABEL_NAME]
+
+        # length_ratio: (batch_size, ). Will be pruned if not used
+        length_ratio = mx.sym.broadcast_div(target_length, source_length, name=C.LENRATIO_LABEL_NAME)
+
+        # check provide_{data,label} names
+        provide_data_names = [d[0] for d in provide_data]
+        utils.check_condition(provide_data_names == data_names,
+                              "incompatible provide_data: %s, names should be %s" % (provide_data_names, data_names))
+        provide_label_names = [d[0] for d in provide_label]
+        utils.check_condition(provide_label_names == label_names,
+                              "incompatible provide_label: %s, names should be %s" % (provide_label_names, label_names))
+
+        def sym_gen(seq_lens):
+            """
+            Returns a (grouped) loss symbol given source & target input lengths.
+            Also returns data and label names for the BucketingModule.
+            """
+            source_seq_len, target_seq_len = seq_lens
+
+            # source embedding
+            (source_embed,
+             source_embed_length,
+             source_embed_seq_len) = self.embedding_source.encode(source, source_length, source_seq_len)
+
+            # target embedding
+            (target_embed,
+             target_embed_length,
+             target_embed_seq_len) = self.embedding_target.encode(target, target_length, target_seq_len)
+
+            # encoder
+            # source_encoded: (batch_size, source_encoded_length, encoder_depth)
+            (source_encoded,
+             source_encoded_length,
+             source_encoded_seq_len) = self.encoder.encode(source_embed,
+                                                           source_embed_length,
+                                                           source_embed_seq_len)
+            # decoder
+            # target_decoded: (batch-size, target_len, decoder_depth)
+            # pointer_scores: (batch-size, target_seq_len, source_seq_len)
+            target_decoded, pointer_scores, attention_scores_list = self.decoder.decode_sequence(source_encoded, source_encoded_length, source_encoded_seq_len,
+                                                          target_embed, target_embed_length, target_embed_seq_len)
+
+            # target_decoded: (batch_size * target_seq_len, decoder_depth)
+            target_decoded = mx.sym.reshape(data=target_decoded, shape=(-3, 0))
+
+            # output layer
+            # logits: (batch_size * target_seq_len, target_vocab_size)
+            logits = self.output_layer(target_decoded)
+            
+            if self.config.num_pointers:
+                # pointer_scores: (batch-size * target_seq_len, source_seq_len)
+                pointer_scores = mx.sym.reshape(data=pointer_scores, shape=(-3, 0))
+                
+                # Concatenate the output vocabulary logits to the pointer scores
+                logits = mx.sym.concat(logits, pointer_scores, dim=1)
+            
+            # 1) standard cross-entropy loss
+            net_outputs = [self.model_loss.get_loss(logits, labels)]
+            # 2) length task losses
+            if self.length_task_loss is not None:
+                # predicted_length_ratios: (batch_size, 1)
+                predicted_length_ratio = self.length_ratio(source_encoded, source_encoded_length)
+                if isinstance(self.length_task_loss, loss.MSELoss):
+                    loss_symbol = self.length_task_loss.get_loss(predicted_length_ratio, length_ratio)
+                elif isinstance(self.length_task_loss, loss.PoissonLoss):
+                    # convert ratios to (expected) length estimations for the Poisson loss
+                    predicted_reference_length = predicted_length_ratio * source_encoded_length.reshape((-1, 1))
+                    loss_symbol = self.length_task_loss.get_loss(predicted_reference_length, target_length)
+                # return both the loss symbol, prediction and the computed length_ratio to be used in metrics
+                net_outputs.extend([loss_symbol,
+                                    mx.sym.BlockGrad(predicted_length_ratio, name=C.LENRATIO_NAME),
+                                    mx.sym.BlockGrad(length_ratio, name=C.LENRATIO_LABEL_NAME)])
+            
+            loss_attention = [self.attention_monotonicity_loss.get_loss(attention_scores_list, default_bucket_key)] #TODO needs --no-bucketing
+           
+            return mx.sym.Group(net_outputs + loss_attention), data_names, label_names
+
+        # Fix model parameters as needed for different training options.
+        utils.check_condition(not self.config.lhuc or self.fixed_param_strategy is None,
+                "LHUC fixes all other parameters and is thus not compatible with other fixing strategies.")
+        if self.config.lhuc:
+            arguments = sym_gen(default_bucket_key)[0].list_arguments()
+            fixed_param_names = [a for a in arguments if not a.endswith(C.LHUC_NAME)]
+        elif self.fixed_param_strategy is not None:
+            arguments = sym_gen(default_bucket_key)[0].list_arguments()
+            fixed_param_names = self._generate_fixed_param_names(arguments, self.fixed_param_strategy)
+        else:
+            fixed_param_names = self.fixed_param_names
+
+        if self._bucketing:
+            logger.info("Using bucketing. Default max_seq_len=%s", default_bucket_key)
+            self.module = mx.mod.BucketingModule(sym_gen=sym_gen,
+                                                 logger=logger,
+                                                 default_bucket_key=default_bucket_key,
+                                                 context=self.context,
+                                                 compression_params=self._gradient_compression_params,
+                                                 fixed_param_names=fixed_param_names)
+        else:
+            logger.info("No bucketing. Unrolled to (%d,%d)",
+                        self.config.config_data.max_seq_len_source, self.config.config_data.max_seq_len_target)
+            symbol, _, __ = sym_gen(default_bucket_key)
+            self.module = mx.mod.Module(symbol=symbol,
+                                        data_names=data_names,
+                                        label_names=label_names,
+                                        logger=logger,
+                                        context=self.context,
+                                        compression_params=self._gradient_compression_params,
+                                        fixed_param_names=fixed_param_names)
+
+        self.module.bind(data_shapes=provide_data,
+                         label_shapes=provide_label,
+                         for_training=True,
+                         force_rebind=True,
+                         grad_req='add' if self._gradient_accumulation else 'write')
+
+        self.module.symbol.save(os.path.join(self.output_dir, C.SYMBOL_NAME))
+
+        self.save_version(self.output_dir)
+        self.save_config(self.output_dir)
+
 
 
 def global_norm(ndarrays: List[mx.nd.NDArray]) -> float:

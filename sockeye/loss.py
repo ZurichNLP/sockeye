@@ -16,7 +16,7 @@ Functions to generate loss symbols for sequence-to-sequence models.
 """
 import logging
 from abc import ABC, abstractmethod
-from typing import List, Optional, Dict
+from typing import List, Optional, Dict, Tuple
 
 import mxnet as mx
 from mxnet.metric import EvalMetric
@@ -66,6 +66,8 @@ def get_loss(config: LossConfig) -> 'Loss':
         return CrossEntropyLoss(config,
                                 output_names=[C.SOFTMAX_OUTPUT_NAME],
                                 label_names=[C.TARGET_LABEL_NAME])
+    elif config.name == C.ATTENTION_MONOTONICITY_LOSS:
+        return AttentionMonotonicity(config)
     else:
         raise ValueError("unknown loss name: %s" % config.name)
 
@@ -233,7 +235,107 @@ class CrossEntropyMetric(EvalMetric):
 
             self.sum_metric += ce.asscalar()
 
+class AttentionMonotonicity(Loss):
+    """
+    Computes the attention monotonicity loss.
 
+    :param loss_config: Loss configuration.
+    """
+
+    def __init__(self, loss_config: LossConfig) -> None:
+        logger.info("Loss: AttentionMonotonicity")
+        self.loss_config = loss_config
+    
+    def get_loss(self, 
+                 attention_scores_list: List[mx.sym.Symbol],
+                 default_bucket_key: Tuple[int],
+                 layers: Optional[str] = 'last', # 'last' or 'all' layers
+                 grad_scale: Optional[float] = 1.0) -> List[mx.sym.Symbol]:
+        
+        if layers == "last":
+            loss = self.monotonicity_score_per_layer(attention_scores_list[-1], default_bucket_key)
+        
+        else:
+            accumulated_loss = mx.sym.zeros_like(attention_scores_list[0])
+            for layer_scores in attention_scores_list:
+                layer_loss = self.monotonicity_score_per_layer(layer_scores, default_bucket_key) # (batch,)
+                accumulated_loss = accumulated_loss + layer_loss
+            
+            loss = mx.sym.mean(accumulated_loss, axis=0)
+        
+        return mx.sym.MakeLoss(loss,
+                                grad_scale=grad_scale)
+    
+    
+    def monotonicity_score_per_layer(self, attention_scores: mx.sym.Symbol, default_bucket_key: Tuple[int]):
+        """
+        param attention_scores: decoder-encoder attention scores (MultiHeadAttention), shape (batch_size, target_length, source_length)
+        """
+        ## need integer value for source length for mx.sym.arange -> pad up to default_bucket_key
+        max_source_length, max_target_length = default_bucket_key
+        #source_len = mx.sym.sum(attention_scores != C.PAD_ID, axis=2)
+       
+        #my_sym = mx.sym.Custom(op_type="PrintValue", data=attention_scores, print_name="My symbol")
+        p = mx.sym.ones_like(attention_scores) ## (batch_size, target_length, max_source_length)
+        
+        #positions = mx.sym.arange(start=1, step=1, repeat=1, infer_range=True) # should be stop=source_length TODO?
+        positions = mx.sym.arange(start=1, step=1, repeat=1, stop=max_source_length) # should be stop=source_length TODO?
+        positions = positions.reshape(shape=(1,1, max_source_length))  # (1, 1, source_length)
+        positions = mx.sym.broadcast_mul(p, positions) # shape(batch, target_length, source_length), values in source_length = arange(source_length) 
+        
+        
+        ## TODO: remove padding for scoring - how do we score variable source/target length though?
+        positionally_weighted_attention = mx.sym.broadcast_mul(attention_scores, positions) # shape(batch_size, target_length,source_length (attention_score*position))
+        ### take average over sequences
+        avg = mx.sym.mean(positionally_weighted_attention, axis=2) # shape (batch, target_length)
+        avg_to_shift = mx.sym.expand_dims(avg, axis=0)
+        avg_to_shift = mx.sym.expand_dims(avg_to_shift, axis=0) # (1,1, batch, target_length)
+        
+        ## need to shift target_length dimension to the left, use BilinearSampler https://mxnet.apache.org/api/python/docs/api/symbol/symbol.html?highlight=bilinear#mxnet.symbol.BilinearSamplers
+        ones = mx.sym.ones_like(avg) # (batch, target_length)
+        zeros = mx.sym.zeros_like(avg)
+        stacked = mx.sym.stack(ones, zeros, axis=0) # (2, batch, target_length)
+        warp = mx.sym.expand_dims(stacked, axis=0) # (1, 2, batch, target_length)
+        grid = mx.sym.GridGenerator(data=warp, transform_type='warp')
+        shifted_avg = mx.sym.BilinearSampler(avg_to_shift, grid).squeeze() # (1,1,batch,target_length) -> (batch, target_length)
+        
+        adjacent_pos_difference = avg - shifted_avg # (batch, target_length)
+        # loss= max(0, avg(y)-avg(y+1))
+        greater_than_zero = mx.sym.broadcast_greater_equal(adjacent_pos_difference, mx.sym.zeros(shape=(1,))) # 1 if avg>0, 0 otherwise shape (batch, target_length)
+        adjacent_pos_difference  = adjacent_pos_difference * greater_than_zero # (batch, target_length): target_length = 0 or diff attention score (y-(y+1))
+        layer_loss = mx.sym.mean(adjacent_pos_difference, axis=1) # (batch, )
+        
+        return layer_loss
+
+    def create_metric(self) -> "AttentionMonotonicityMetric":
+        return AttentionMonotonicityMetric(self.loss_config)
+        
+
+class AttentionMonotonicityMetric(EvalMetric):
+    """
+    Calculate the monotonicity of attention scores (averaged over decoder layers).
+    """
+    def __init__(self,
+                 loss_config: LossConfig,
+                 name: str = C.ATTENTION_MONOTONICITY_LOSS,
+                 output_names: Optional[List[str]] = None,
+                 label_names: Optional[List[str]] = None) -> None:
+        super().__init__(name, output_names=output_names, label_names=label_names)
+        self.loss_config = loss_config
+
+
+
+    def update(self, attention_losses):
+        print(attention_losses.shape)
+        for attention_loss in attention_losses:
+            (batch_size,) = attention_loss.shape
+            loss = mx.nd.sum(attention_loss)
+            self.num_inst += batch_size
+            self.sum_metric += loss.asscalar()
+            #if log_cosine_distance_per_batch:
+                #logger.info("Average cosine distance for batch: {}".format(self.sum_metric/self.num_inst))
+                
+                
 class PoissonLoss(Loss):
     """
     Computes the Poisson regression loss.
@@ -372,3 +474,7 @@ class LengthRatioMSEMetric(MSEMetric):
             label.update({name:pred[name] for name in self.label_names})
         super().update_dict(label, pred)
 
+
+    
+    
+    

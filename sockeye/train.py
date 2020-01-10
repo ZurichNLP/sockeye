@@ -482,7 +482,8 @@ def create_decoder_config(args: argparse.Namespace, encoder_num_hidden: int,
             max_seq_len_source=max_seq_len_source,
             max_seq_len_target=max_seq_len_target,
             conv_config=None,
-            lhuc=args.lhuc is not None and (C.LHUC_DECODER in args.lhuc or C.LHUC_ALL in args.lhuc))
+            lhuc=args.lhuc is not None and (C.LHUC_DECODER in args.lhuc or C.LHUC_ALL in args.lhuc),
+            return_dec_enc_att_probs=args.attention_monotonicity_loss)
 
     elif args.decoder == C.CONVOLUTION_TYPE:
         if args.decoder_only:
@@ -690,6 +691,13 @@ def create_model_config(args: argparse.Namespace,
                                   vocab_size=target_vocab_size,
                                   normalization_type=args.loss_normalization_type,
                                   label_smoothing=args.label_smoothing)
+    
+    monotonicity_config_loss = None
+    if args.attention_monotonicity_loss:
+        monotonicity_config_loss = loss.LossConfig(name='attention-monotonicity',
+                                  vocab_size=None,
+                                  normalization_type=None,
+                                  label_smoothing=None)
 
     if args.length_task is not None:
         config_length_task = layers.LengthRatioConfig(num_layers=args.length_task_layers, weight=args.length_task_weight)
@@ -715,7 +723,8 @@ def create_model_config(args: argparse.Namespace,
                                      weight_tying_type=args.weight_tying_type if args.weight_tying else None,
                                      weight_normalization=args.weight_normalization,
                                      lhuc=args.lhuc is not None,
-                                     num_pointers=num_pointers)
+                                     num_pointers=num_pointers,
+                                     attention_monotonicity_loss=monotonicity_config_loss)
     return model_config
 
 
@@ -734,7 +743,8 @@ def create_training_model(config: model.ModelConfig,
     :param args: Arguments as returned by argparse.
     :return: The training model.
     """
-    training_model = training.TrainingModel(config=config,
+    if args.attention_monotonicity_loss:
+        training_model = training.MonotoneAttentionModel(config=config,
                                             context=context,
                                             output_dir=output_dir,
                                             provide_data=train_iter.provide_data,
@@ -745,6 +755,21 @@ def create_training_model(config: model.ModelConfig,
                                             gradient_accumulation=args.update_interval > 1,
                                             fixed_param_names=args.fixed_param_names,
                                             fixed_param_strategy=args.fixed_param_strategy)
+        
+    else:
+        training_model = training.TrainingModel(config=config,
+                                            context=context,
+                                            output_dir=output_dir,
+                                            provide_data=train_iter.provide_data,
+                                            provide_label=train_iter.provide_label,
+                                            default_bucket_key=train_iter.default_bucket_key,
+                                            bucketing=not args.no_bucketing,
+                                            gradient_compression_params=gradient_compression_params(args),
+                                            gradient_accumulation=args.update_interval > 1,
+                                            fixed_param_names=args.fixed_param_names,
+                                            fixed_param_strategy=args.fixed_param_strategy)
+    
+    
 
     return training_model
 

@@ -1172,6 +1172,11 @@ def add_training_args(params):
                               help="Do not perform any actual training, but print statistics about the model"
                               " and mode of operation.")
 
+def add_attention_loss(params):
+    params = params.add_argument_group("Monotone attention loss parameters")
+    params.add_argument('--attention-monotonicity-loss',
+                              action='store_true',
+                              help="Use additional loss to encourage monotone decoder-encoder attention.")
 
 def add_train_cli_args(params):
     add_training_io_args(params)
@@ -1179,6 +1184,7 @@ def add_train_cli_args(params):
     add_training_args(params)
     add_device_args(params)
     add_logging_args(params)
+    add_attention_loss(params)
 
 
 def add_translate_cli_args(params):

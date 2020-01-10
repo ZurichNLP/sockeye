@@ -62,6 +62,7 @@ class ModelConfig(Config):
                  config_loss: loss.LossConfig,
                  config_length_task_loss: Optional[loss.LossConfig] = None,
                  config_length_task: layers.LengthRatioConfig = None,
+                 attention_monotonicity_loss: Optional[loss.LossConfig] = None,
                  weight_tying: bool = False,
                  weight_tying_type: Optional[str] = C.WEIGHT_TYING_TRG_SOFTMAX,
                  weight_normalization: bool = False,
@@ -78,6 +79,7 @@ class ModelConfig(Config):
         self.config_loss = config_loss
         self.config_length_task_loss = config_length_task_loss
         self.config_length_task = config_length_task
+        self.attention_monotonicity_loss = attention_monotonicity_loss
         self.weight_tying = weight_tying
         self.weight_tying_type = weight_tying_type
         self.weight_normalization = weight_normalization

@@ -273,11 +273,13 @@ class TransformerDecoder(Decoder):
         if self.config.dropout_prepost > 0.0:
             target = mx.sym.Dropout(data=target, p=self.config.dropout_prepost)
 
+        attention_scores_list = [] # length: layers, attention_scores shape: (batch_size, source_length, depth)
         for layer in self.layers:
-            target = layer(target, target_bias, source_encoded, source_bias)
+            target, attention_scores = layer(target, target_bias, source_encoded, source_bias)
+            attention_scores_list.append(attention_scores) 
         target = self.final_process(target, None)
-
-        return target, None
+        
+        return target, None, attention_scores_list
 
     def decode_step(self,
                     step: int,
@@ -320,7 +322,7 @@ class TransformerDecoder(Decoder):
         new_states = [source_encoded, source_encoded_lengths]
         layer_caches = self._get_cache_per_layer(cast(List[mx.sym.Symbol], cache))
         for layer, layer_cache in zip(self.layers, layer_caches):
-            target = layer(target, target_bias, source_encoded, source_bias, layer_cache)
+            target, att_probs = layer(target, target_bias, source_encoded, source_bias, layer_cache)
             # store updated keys and values in states list.
             # (layer.__call__() has the side-effect of updating contents of layer_cache)
             new_states += [layer_cache['k'], layer_cache['v']]
