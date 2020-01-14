@@ -532,6 +532,7 @@ class MonotoneAttentionModel(TrainingModel):
         target = mx.sym.Variable(C.TARGET_NAME)
         target_length = utils.compute_lengths(target)
         labels = mx.sym.reshape(data=mx.sym.Variable(C.TARGET_LABEL_NAME), shape=(-1,))
+        target_words = mx.sym.reshape(data=target, shape=(-1,), name="target_words")
 
         self.model_loss = loss.get_loss(self.config.config_loss)
         logger.info("Using model loss: %s", self.model_loss)
@@ -618,7 +619,11 @@ class MonotoneAttentionModel(TrainingModel):
                                     mx.sym.BlockGrad(predicted_length_ratio, name=C.LENRATIO_NAME),
                                     mx.sym.BlockGrad(length_ratio, name=C.LENRATIO_LABEL_NAME)])
             
-            loss_attention = [self.attention_monotonicity_loss.get_loss(attention_scores_list=attention_scores_list, default_bucket_key=default_bucket_key, grad_scale=self._monotone_attention_loss_lambda)] #TODO needs --no-bucketing
+            loss_attention = [self.attention_monotonicity_loss.get_loss(attention_scores_list=attention_scores_list,
+                                                                        num_attention_heads=self.config.config_decoder.attention_heads,
+                                                                        target_words=target_words,
+                                                                        default_bucket_key=default_bucket_key, 
+                                                                        grad_scale=self._monotone_attention_loss_lambda)] #TODO needs --no-bucketing
            
             return mx.sym.Group(net_outputs + loss_attention), data_names, label_names
 
@@ -1551,8 +1556,6 @@ class Speedometer:
                     name_value = metric.get_name_value()
                     if self.auto_reset:
                         metric.reset()
-                    logger.info(self.msg + '\t%s=%f' * len(name_value),
-                                epoch, count, samples_per_sec, tokens_per_sec, updates_per_sec, *sum(name_value, ()))
                     
                     if metric_attention_monotonicity_loss is not None:
                         attention_name_value = metric_attention_monotonicity_loss.get_name_value()
@@ -1560,6 +1563,9 @@ class Speedometer:
                             metric_attention_monotonicity_loss.reset()
                         logger.info(self.msg + '\t%s=%f' + '\t%s=%f' * len(name_value),
                                 epoch, count, samples_per_sec, tokens_per_sec, updates_per_sec, *sum(name_value, ()), *sum(attention_name_value,()))
+                    else:
+                        logger.info(self.msg + '\t%s=%f' * len(name_value),
+                                epoch, count, samples_per_sec, tokens_per_sec, updates_per_sec, *sum(name_value, ()))
                 else:
                     logger.info(self.msg, epoch, count, samples_per_sec)
 

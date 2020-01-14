@@ -249,17 +249,19 @@ class AttentionMonotonicity(Loss):
     
     def get_loss(self, 
                  attention_scores_list: List[mx.sym.Symbol],
+                 num_attention_heads: int,
                  default_bucket_key: Tuple[int],
+                 target_words: mx.sym.Symbol,
                  layers: Optional[str] = 'last', # 'last' or 'all' layers
                  grad_scale: Optional[float] = 0.5) -> List[mx.sym.Symbol]:
         
         if layers == "last":
-            loss = self.monotonicity_score_per_layer(attention_scores_list[-1], default_bucket_key)
+            loss = self.monotonicity_score_per_layer(attention_scores_list[-1], num_attention_heads, target_words, default_bucket_key)
         
         else:
             accumulated_loss = mx.sym.zeros_like(attention_scores_list[0])
             for layer_scores in attention_scores_list:
-                layer_loss = self.monotonicity_score_per_layer(layer_scores, default_bucket_key) # (batch,)
+                layer_loss = self.monotonicity_score_per_layer(layer_scores, num_attention_heads, target_words, default_bucket_key) # (batch,)
                 accumulated_loss = accumulated_loss + layer_loss
             
             loss = mx.sym.mean(accumulated_loss, axis=0)
@@ -268,33 +270,44 @@ class AttentionMonotonicity(Loss):
                                 grad_scale=grad_scale)
     
     
-    def monotonicity_score_per_layer(self, attention_scores: mx.sym.Symbol, default_bucket_key: Tuple[int]):
+    def monotonicity_score_per_layer(self, 
+                                     attention_scores: mx.sym.Symbol,
+                                     num_attention_heads: int,
+                                     target_words: mx.sym.Symbol, 
+                                     default_bucket_key: Tuple[int]):
         """
-        param attention_scores: decoder-encoder attention scores (MultiHeadAttention), shape (batch_size, target_length, source_length)
+        param attention_scores: decoder-encoder attention scores (MultiHeadAttention), shape (batch_size * attention_heads, target_length, source_length)
+        param target_words: target words, used to remove padding. shape (batch_size * target_length)
+        param default_bucket_key: Tuple of (max_source_length, max_target_length). Need max_source_length to create position matrix with arange.
         """
         ## need integer value for source length for mx.sym.arange -> pad up to default_bucket_key
         max_source_length, max_target_length = default_bucket_key
         #source_len = mx.sym.sum(attention_scores != C.PAD_ID, axis=2)
-       
-        #my_sym = mx.sym.Custom(op_type="PrintValue", data=attention_scores, print_name="My symbol")
+        
+        # take average of attention_heads on each position
+        attention_scores = attention_scores.reshape(shape=(-4, -1, num_attention_heads, -2)) # (batch_size, attention_heads, target_length, source_length)
+        attention_scores = mx.sym.mean(attention_scores, axis=1) # (batch_size, target_length, source_length)
+        
         p = mx.sym.ones_like(attention_scores) ## (batch_size, target_length, max_source_length)
         
-        #positions = mx.sym.arange(start=1, step=1, repeat=1, infer_range=True) # should be stop=source_length TODO?
         positions = mx.sym.arange(start=1, step=1, repeat=1, stop=max_source_length+1) # should be stop=source_length TODO?
-        #positions = mx.sym.expand_dims(positions, axis=0)
-        #positions = mx.sym.expand_dims(positions, axis=0)
         positions = positions.reshape(shape=(1,1, max_source_length))  # (1, 1, source_length)
         positions = mx.sym.broadcast_mul(p, positions) # shape(batch, target_length, source_length), values in source_length = arange(source_length) 
         
         
-        ## TODO: remove padding for scoring - how do we score variable source/target length though?
-        positionally_weighted_attention = mx.sym.broadcast_mul(attention_scores, positions) # shape(batch_size, target_length,source_length (attention_score*position))
+        ## TODO: remove padding for scoring - target yes, what about source positions? 
+        positionally_weighted_attention = mx.sym.broadcast_mul(attention_scores, positions) # shape(batch_size, target_length, source_length (attention_score*position))
         ### take average over sequences
         avg = mx.sym.mean(positionally_weighted_attention, axis=2) # shape (batch, target_length)
+        ## set padded positions in target to zero (we dont care about alignment scores from padded tokens)
+        mask = (target_words != C.PAD_ID) # target_words (batch_size, target_length), mask: 0 where padded, 1 otherwise
+        avg_r = avg.reshape(shape=(-3,))
+        avg = mx.sym.broadcast_mul(avg_r, mask).reshape_like(avg)
+        
         avg_to_shift = mx.sym.expand_dims(avg, axis=0)
         avg_to_shift = mx.sym.expand_dims(avg_to_shift, axis=0) # (1,1, batch, target_length)
         
-        ## need to shift target_length dimension to the left, use BilinearSampler https://mxnet.apache.org/api/python/docs/api/symbol/symbol.html?highlight=bilinear#mxnet.symbol.BilinearSamplers
+        # shift target_length dimension to the left with BilinearSampler https://mxnet.apache.org/api/python/docs/api/symbol/symbol.html?highlight=bilinear#mxnet.symbol.BilinearSamplers
         ones = mx.sym.ones_like(avg) # (batch, target_length)
         zeros = mx.sym.zeros_like(avg)
         stacked = mx.sym.stack(ones, zeros, axis=0) # (2, batch, target_length)
@@ -306,7 +319,8 @@ class AttentionMonotonicity(Loss):
         # loss= max(0, avg(y)-avg(y+1))
         greater_than_zero = mx.sym.broadcast_greater_equal(adjacent_pos_difference, mx.sym.zeros(shape=(1,))) # 1 if avg>0, 0 otherwise shape (batch, target_length)
         adjacent_pos_difference  = adjacent_pos_difference * greater_than_zero # (batch, target_length): target_length = 0 or diff attention score (y-(y+1))
-        layer_loss = mx.sym.mean(adjacent_pos_difference, axis=1) # (batch, )
+        
+        layer_loss = mx.sym.sum(adjacent_pos_difference, axis=1) # (batch, )
         return layer_loss
 
     def create_metric(self) -> "AttentionMonotonicityMetric":

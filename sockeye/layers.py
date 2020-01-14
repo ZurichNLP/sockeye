@@ -383,19 +383,6 @@ def broadcast_to_heads(F, x: mx.sym.Symbol, num_heads: int, ndim: int, fold_head
         # x: (batch, heads, dims...)
         return x
 
-#def get_monoticity(contexts: mx.sym.Symbol, lengths: mx.sym.Symbol):
-    #"""
-    #Calculate monoticity value of decoder-encoder attention scores.
-
-    #:param contexts: Combined heads of multi-head attention, shape (batch, length, depth).
-    #:param lengths: Optional lengths of keys. Shape: (batch_size,).
-    #:return:
-    #"""
-    #length =
-    #positions = mx.sym.arange(length)
-    #logger.info("positions".format(positions))
-    #exit(0)
-
 class DotAttentionCell(mx.gluon.HybridBlock):
 
     def __init__(self, dropout: float = 0.0, prefix: str = '') -> None:
@@ -426,9 +413,6 @@ class DotAttentionCell(mx.gluon.HybridBlock):
         probs = F.Dropout(probs, p=self.dropout) if self.dropout > 0.0 else probs
 
         # (n, lq, lk) x (n, lk, dv) -> (n, lq, dv)
-        #if return_probs:
-            #return F.batch_dot(lhs=probs, rhs=values), probs #probs(n, lq, lk)
-        #else:
         return F.batch_dot(lhs=probs, rhs=values), probs
 
 
@@ -494,7 +478,7 @@ class MultiHeadAttentionBase(mx.gluon.HybridBlock):
         # (batch, query_max_length, depth)
         contexts = combine_heads(F, contexts, self.depth_per_head, self.heads)
 
-        # contexts: (batch, query_max_length, output_depth)
+        # contexts: (batch, query_max_length, output_depth), probs: (batch_size * attention_heads, target_length, source_length)
         contexts = self.ff_out(contexts)
         return contexts, probs
 
@@ -604,6 +588,7 @@ class MultiHeadAttention(MultiHeadAttentionBase):
         keys = self.ff_k(memory)
         # (batch, memory_max_length, depth)
         values = self.ff_v(memory)
+        # probs: (batch_size * attention_heads, target_length, source_length)
         context, probs = self._attend(F, queries, keys, values, bias=bias, lengths=memory_lengths)
         return context, probs
 
