@@ -505,7 +505,8 @@ class MonotoneAttentionModel(TrainingModel):
                  gradient_accumulation: bool = False,
                  fixed_param_names: Optional[List[str]] = None,
                  fixed_param_strategy: Optional[str] = None,
-                 monotone_attention_loss_lambda: Optional[float] = 0.5) -> None:
+                 monotone_attention_loss_lambda: Optional[float] = 0.5,
+                 attention_monotonicity_loss_layers: Optional[str] = "last") -> None:
         model.SockeyeModel.__init__(self, config=config)
         self.context = context
         self.output_dir = output_dir
@@ -515,6 +516,7 @@ class MonotoneAttentionModel(TrainingModel):
         self._gradient_compression_params = gradient_compression_params
         self._gradient_accumulation = gradient_accumulation
         self._monotone_attention_loss_lambda = monotone_attention_loss_lambda
+        self._monotone_attention_loss_layers = attention_monotonicity_loss_layers
         self._initialize(provide_data, provide_label, default_bucket_key)
         self._monitor = None  # type: Optional[mx.monitor.Monitor]
 
@@ -623,6 +625,7 @@ class MonotoneAttentionModel(TrainingModel):
                                                                         num_attention_heads=self.config.config_decoder.attention_heads,
                                                                         target_words=target_words,
                                                                         default_bucket_key=default_bucket_key, 
+                                                                        layers=self._monotone_attention_loss_layers,
                                                                         grad_scale=self._monotone_attention_loss_lambda)] #TODO needs --no-bucketing
            
             return mx.sym.Group(net_outputs + loss_attention), data_names, label_names

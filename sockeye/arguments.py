@@ -1181,6 +1181,10 @@ def add_attention_loss(params):
                               type=float,
                               default=0.5,
                               help='Scale monotone attention loss by lambda, CE loss will be scaled by (1-lambda). Default: %(default)s.')
+    params.add_argument('--attention-monotonicity-loss-layers',
+                              choices=C.ATTENTION_MONOTONICITY_LOSS_LAYERS,
+                              default=C.ATTENTION_MONOTONICITY_LOSS_LAYER_LAST,
+                              help='Which layers are used to calculate monotone attention loss. Default: %(default)s.')
 
 def add_train_cli_args(params):
     add_training_io_args(params)

@@ -755,7 +755,8 @@ def create_training_model(config: model.ModelConfig,
                                             gradient_accumulation=args.update_interval > 1,
                                             fixed_param_names=args.fixed_param_names,
                                             fixed_param_strategy=args.fixed_param_strategy,
-                                            monotone_attention_loss_lambda=args.attention_monotonicity_loss_lambda)
+                                            monotone_attention_loss_lambda=args.attention_monotonicity_loss_lambda,
+                                            attention_monotonicity_loss_layers=args.attention_monotonicity_loss_layers)
         
     else:
         training_model = training.TrainingModel(config=config,
