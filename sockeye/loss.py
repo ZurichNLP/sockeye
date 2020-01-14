@@ -144,7 +144,7 @@ class CrossEntropyLoss(Loss):
         self.ignore_label = ignore_label
         self.name = name
 
-    def get_loss(self, logits: mx.sym.Symbol, labels: mx.sym.Symbol) -> mx.sym.Symbol:
+    def get_loss(self, logits: mx.sym.Symbol, labels: mx.sym.Symbol, grad_scale: Optional[float] = 0.5) -> mx.sym.Symbol:
         """
         Returns loss symbol given logits and integer-coded labels.
 
@@ -160,6 +160,7 @@ class CrossEntropyLoss(Loss):
             raise ValueError("Unknown loss normalization type: %s" % self.loss_config.normalization_type)
         return mx.sym.SoftmaxOutput(data=logits,
                                     label=labels,
+                                    grad_scale=grad_scale,
                                     ignore_label=self.ignore_label,
                                     use_ignore=True,
                                     normalization=normalization,
@@ -250,7 +251,7 @@ class AttentionMonotonicity(Loss):
                  attention_scores_list: List[mx.sym.Symbol],
                  default_bucket_key: Tuple[int],
                  layers: Optional[str] = 'last', # 'last' or 'all' layers
-                 grad_scale: Optional[float] = 1.0) -> List[mx.sym.Symbol]:
+                 grad_scale: Optional[float] = 0.5) -> List[mx.sym.Symbol]:
         
         if layers == "last":
             loss = self.monotonicity_score_per_layer(attention_scores_list[-1], default_bucket_key)
@@ -327,14 +328,11 @@ class AttentionMonotonicityMetric(EvalMetric):
 
 
     def update(self, attention_losses):
-        print(attention_losses.shape)
         for attention_loss in attention_losses:
             (batch_size,) = attention_loss.shape
             loss = mx.nd.sum(attention_loss)
             self.num_inst += batch_size
             self.sum_metric += loss.asscalar()
-            #if log_cosine_distance_per_batch:
-                #logger.info("Average cosine distance for batch: {}".format(self.sum_metric/self.num_inst))
                 
                 
 class PoissonLoss(Loss):

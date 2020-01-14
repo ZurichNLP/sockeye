@@ -504,7 +504,8 @@ class MonotoneAttentionModel(TrainingModel):
                  gradient_compression_params: Optional[Dict[str, Any]] = None,
                  gradient_accumulation: bool = False,
                  fixed_param_names: Optional[List[str]] = None,
-                 fixed_param_strategy: Optional[str] = None) -> None:
+                 fixed_param_strategy: Optional[str] = None,
+                 monotone_attention_loss_lambda: Optional[float] = 0.5) -> None:
         model.SockeyeModel.__init__(self, config=config)
         self.context = context
         self.output_dir = output_dir
@@ -513,6 +514,7 @@ class MonotoneAttentionModel(TrainingModel):
         self._bucketing = bucketing
         self._gradient_compression_params = gradient_compression_params
         self._gradient_accumulation = gradient_accumulation
+        self._monotone_attention_loss_lambda = monotone_attention_loss_lambda
         self._initialize(provide_data, provide_label, default_bucket_key)
         self._monitor = None  # type: Optional[mx.monitor.Monitor]
 
@@ -600,7 +602,7 @@ class MonotoneAttentionModel(TrainingModel):
                 logits = mx.sym.concat(logits, pointer_scores, dim=1)
             
             # 1) standard cross-entropy loss
-            net_outputs = [self.model_loss.get_loss(logits, labels)]
+            net_outputs = [self.model_loss.get_loss(logits=logits, labels=labels, grad_scale=1-self._monotone_attention_loss_lambda)]
             # 2) length task losses
             if self.length_task_loss is not None:
                 # predicted_length_ratios: (batch_size, 1)
@@ -616,7 +618,7 @@ class MonotoneAttentionModel(TrainingModel):
                                     mx.sym.BlockGrad(predicted_length_ratio, name=C.LENRATIO_NAME),
                                     mx.sym.BlockGrad(length_ratio, name=C.LENRATIO_LABEL_NAME)])
             
-            loss_attention = [self.attention_monotonicity_loss.get_loss(attention_scores_list, default_bucket_key)] #TODO needs --no-bucketing
+            loss_attention = [self.attention_monotonicity_loss.get_loss(attention_scores_list=attention_scores_list, default_bucket_key=default_bucket_key, grad_scale=self._monotone_attention_loss_lambda)] #TODO needs --no-bucketing
            
             return mx.sym.Group(net_outputs + loss_attention), data_names, label_names
 
@@ -881,6 +883,8 @@ class EarlyStoppingTrainer:
             logger.info("Training started.")
 
         metric_train, metric_val, metric_loss = self._create_metrics(metrics, self.model.optimizer, self.model.loss)
+        if hasattr(self.model, 'attention_monotonicity_loss')  and self.model.attention_monotonicity_loss is not None:
+            attention_monotonicity_loss = self.model.attention_monotonicity_loss.create_metric()
 
         process_manager = None
         if decoder is not None:
@@ -921,7 +925,7 @@ class EarlyStoppingTrainer:
             ######
             batch = next_data_batch
             self.state.batches += 1
-            self._step(self.model, batch, checkpoint_interval, metric_train, metric_loss)
+            self._step(self.model, batch, checkpoint_interval, metric_train, metric_loss, attention_monotonicity_loss)
             batch_num_samples = batch.data[0].shape[0]
             batch_num_tokens = batch.data[0].shape[1] * batch_num_samples
             self.state.samples += batch_num_samples
@@ -934,7 +938,7 @@ class EarlyStoppingTrainer:
             self.model.prepare_batch(next_data_batch)
 
             speedometer(self.state.epoch, self.state.batches, self.state.updates,
-                        batch_num_samples, batch_num_tokens, metric_train)
+                        batch_num_samples, batch_num_tokens, metric_train, attention_monotonicity_loss)
 
             ############
             # CHECKPOINT
@@ -1083,7 +1087,8 @@ class EarlyStoppingTrainer:
               batch: mx.io.DataBatch,
               checkpoint_interval: int,
               metric_train: mx.metric.EvalMetric,
-              metric_loss: Optional[mx.metric.EvalMetric] = None):
+              metric_loss: Optional[mx.metric.EvalMetric] = None,
+              metric_attention_monotonicity_loss: Optional[mx.metric.EvalMetric] = None):
         """
         Performs an update to model given a batch and updates metrics.
         """
@@ -1105,6 +1110,12 @@ class EarlyStoppingTrainer:
             [(_, m_val)] = metric_loss.get_name_value()
             batch_state = BatchState(metric_val=m_val)
             optimizer.pre_update_batch(batch_state)
+        
+        if metric_attention_monotonicity_loss is not None:
+            # Cosine distance encoded source + target for this batch
+            metric_attention_monotonicity_loss.reset()
+            outputs = model.module.get_outputs()
+            metric_attention_monotonicity_loss.update([model.module.get_outputs()[1]])
 
         ########
         # UPDATE
@@ -1518,7 +1529,7 @@ class Speedometer:
         self.msg = 'Epoch[%d] Batch [%d]\tSpeed: %.2f samples/sec %.2f tokens/sec %.2f updates/sec'
 
     def __call__(self, epoch: int, batches: int, updates: int, samples: int,
-                 tokens: int, metric: Optional[mx.metric.EvalMetric]):
+                 tokens: int, metric: Optional[mx.metric.EvalMetric], metric_attention_monotonicity_loss: Optional[mx.metric.EvalMetric]):
         count = batches
         if self.last_count > count:
             self.init = False
@@ -1542,6 +1553,13 @@ class Speedometer:
                         metric.reset()
                     logger.info(self.msg + '\t%s=%f' * len(name_value),
                                 epoch, count, samples_per_sec, tokens_per_sec, updates_per_sec, *sum(name_value, ()))
+                    
+                    if metric_attention_monotonicity_loss is not None:
+                        attention_name_value = metric_attention_monotonicity_loss.get_name_value()
+                        if self.auto_reset:
+                            metric_attention_monotonicity_loss.reset()
+                        logger.info(self.msg + '\t%s=%f' + '\t%s=%f' * len(name_value),
+                                epoch, count, samples_per_sec, tokens_per_sec, updates_per_sec, *sum(name_value, ()), *sum(attention_name_value,()))
                 else:
                     logger.info(self.msg, epoch, count, samples_per_sec)
 

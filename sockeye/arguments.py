@@ -1177,6 +1177,10 @@ def add_attention_loss(params):
     params.add_argument('--attention-monotonicity-loss',
                               action='store_true',
                               help="Use additional loss to encourage monotone decoder-encoder attention.")
+    params.add_argument('--attention-monotonicity-loss-lambda',
+                              type=float,
+                              default=0.5,
+                              help='Scale monotone attention loss by lambda, CE loss will be scaled by (1-lambda). Default: %(default)s.')
 
 def add_train_cli_args(params):
     add_training_io_args(params)
