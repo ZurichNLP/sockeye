@@ -153,7 +153,7 @@ class TrainingModel(model.SockeyeModel):
                 logits = self.output_layer(target_decoded)
                 loss_output = self.model_loss.get_loss(logits, labels)
             else:
-                if self.config.pointer_net_type == C.POINTER_NET_RNN:
+                if self.config.pointer_net_type == C.POINTER_NET_RNN or self.config.pointer_net_type == C.POINTER_NET_TRANSFORMER:
                     ## RESHAPING
                     # target_decoded: (batch_size * target_seq_len, rnn_num_hidden)
                     target_decoded = mx.sym.reshape(data=target_decoded, shape=(-3, 0))
@@ -162,12 +162,15 @@ class TrainingModel(model.SockeyeModel):
 
                     context, attention = target_decoded_and_attention[1:]
 
-                    # context: (batch_size * trg_seq_len, encoder_num_hidden)
+                    # context: (batch_size * trg_seq_len, encoder_num_hidden), attention: (batch_size * trg_seq_len, source_length)
                     context = mx.sym.reshape(data=context, shape=(-3, 0))
                     attention = mx.sym.reshape(data=attention, shape=(-3, 0))
 
                     # softmax_probs: (batch_size * target_seq_len, target_vocab_size+src_seq_len)
-                    softmax_probs = self.output_layer(target_decoded, attention=attention, context=context, target_embed=target_embed)
+                    num_attention_heads=None
+                    if self.config.pointer_net_type == C.POINTER_NET_TRANSFORMER:
+                        num_attention_heads=self.config.config_decoder.attention_heads
+                    softmax_probs = self.output_layer(target_decoded, attention=attention, context=context, target_embed=target_embed, num_attention_heads=num_attention_heads)
 
                 loss_output = self.model_loss.get_loss(softmax_probs, labels)
 
@@ -538,7 +541,7 @@ class EarlyStoppingTrainer:
             self._update_best_optimizer_states(lr_decay_opt_states_reset)
             self.tflogger.log_graph(self.model.current_module.symbol)
             logger.info("Training started.")
-
+            
         metric_train, metric_val, metric_loss = self._create_metrics(metrics, self.model.optimizer, self.model.loss)
 
         process_manager = None
@@ -711,13 +714,14 @@ class EarlyStoppingTrainer:
 
         # If using an extended optimizer, provide extra state information about the current batch
         optimizer = model.optimizer
-        if metric_loss is not None and isinstance(optimizer, SockeyeOptimizer):
+        if metric_loss is not None: #and isinstance(optimizer, SockeyeOptimizer):
             # Loss for this batch
             metric_loss.reset()
             metric_loss.update(batch.label, model.module.get_outputs())
             [(_, m_val)] = metric_loss.get_name_value()
             batch_state = BatchState(metric_val=m_val)
             optimizer.pre_update_batch(batch_state)
+
 
         ########
         # UPDATE

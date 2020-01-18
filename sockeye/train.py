@@ -25,6 +25,7 @@ from typing import Any, cast, Optional, Dict, List, Tuple
 import mxnet as mx
 
 from . import arguments
+from . import align
 from . import checkpoint_decoder
 from . import constants as C
 from . import convolution
@@ -78,7 +79,7 @@ def check_arg_compatibility(args: argparse.Namespace):
 
     :param args: Arguments as returned by argparse.
     """
-    check_condition(args.encoder == C.IMAGE_PRETRAIN_TYPE or not args.use_pointer_nets or args.shared_vocab or args.prepared_data,
+    check_condition(args.encoder == C.IMAGE_PRETRAIN_TYPE or not args.use_pointer_nets or args.shared_vocab or args.prepared_data or args.weight_tying_type==C.WEIGHT_TYING_SRC_TRG_SOFTMAX or args.weight_tying_type==C.WEIGHT_TYING_SRC_TRG,
                     "Pointer networks required a shared vocabulary.")
 
     check_condition(args.optimized_metric == C.BLEU or args.optimized_metric == C.ROUGE1 or args.optimized_metric in args.metrics,
@@ -182,7 +183,7 @@ def create_checkpoint_decoder(args: argparse.Namespace,
     if args.use_cpu or args.decode_and_evaluate_use_cpu:
         context = mx.cpu()
     elif args.decode_and_evaluate_device_id is not None:
-        context = utils.determine_context(device_ids=args.decode_and_evaluate_device_id,
+        context = utils.determine_context(device_ids=[args.decode_and_evaluate_device_id],
                                           use_cpu=False,
                                           disable_device_locking=args.disable_device_locking,
                                           lock_dir=args.lock_dir,

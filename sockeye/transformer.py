@@ -178,7 +178,7 @@ class TransformerDecoderBlock:
         target = self.post_self_attention(target_self_att, target)
 
         # encoder attention
-        target_enc_att = self.enc_attention(queries=self.pre_enc_attention(target, None),
+        target_enc_att, attention_scores = self.enc_attention(queries=self.pre_enc_attention(target, None),
                                             memory=source,
                                             bias=source_bias)
         target = self.post_enc_attention(target_enc_att, target)
@@ -190,7 +190,7 @@ class TransformerDecoderBlock:
         if self.lhuc:
             target = self.lhuc(target)
 
-        return target
+        return target, attention_scores, target_enc_att
 
 
 class TransformerProcessBlock:

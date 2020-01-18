@@ -267,15 +267,20 @@ class TransformerDecoder(Decoder):
 
         if self.config.dropout_prepost > 0.0:
             target = mx.sym.Dropout(data=target, p=self.config.dropout_prepost)
-
+        
+        # TODO: context + attention scores of only last layer or all?
+        #attention_scores_list = [] # length: layers, attention_scores shape: (batch_size * attention_heads, source_length, depth)
+        #contexts = [] # length: layers, attention_scores shape: (batch_size * attention_heads, source_length, depth)
         for layer in self.layers:
-            target = layer(target=target,
+            target, attention_scores, context = layer(target=target,
                            target_bias=target_bias,
                            source=source_encoded,
                            source_bias=source_bias)
+            #attention_scores_list.append(attention_scores)
+            #contexts.append(context)
         target = self.final_process(data=target, prev=None)
 
-        return target
+        return target, context, attention_scores
 
     def decode_step(self,
                     step: int,
