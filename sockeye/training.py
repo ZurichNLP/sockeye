@@ -819,6 +819,7 @@ class EarlyStoppingTrainer:
             # STEP
             ######
             batch = next_data_batch
+            self.state.batches += 1
             self._step(self.model, batch, checkpoint_interval, metric_train, metric_loss, cosine_loss, log_cosine_distance_per_batch)
             batch_num_samples = batch.data[0].shape[0]
             batch_num_tokens = batch.data[0].shape[1] * batch_num_samples
@@ -831,7 +832,7 @@ class EarlyStoppingTrainer:
             next_data_batch = train_iter.next()
             self.model.prepare_batch(next_data_batch)
 
-            speedometer(self.state.epoch, self.state.updates, self.state.updates, batch_num_samples, batch_num_tokens, metric_train, cosine_loss)
+            speedometer(self.state.epoch, self.state.batches, self.state.updates, batch_num_samples, batch_num_tokens, metric_train, cosine_loss)
 
             ############
             # CHECKPOINT
