@@ -245,7 +245,8 @@ class PointerOutputLayer(OutputLayer):
                  weight: Optional[mx.sym.Symbol],
                  weight_normalization: bool,
                  prefix: str = C.POINTER_NET_OUTPUT_LAYER_PREFIX,
-                 pointer_type: Optional[str] = C.POINTER_NET_RNN) -> None:
+                 pointer_type: Optional[str] = C.POINTER_NET_RNN,
+                 inference: Optional[bool] = False) -> None:
 
         super().__init__(hidden_size, vocab_size, weight, weight_normalization, prefix)
 
@@ -273,6 +274,7 @@ class PointerOutputLayer(OutputLayer):
         self.bias_output = mx.sym.Variable("%spointer_bias_output" % self.prefix, init=mx.init.Zero())
         
         self.pointer_type = pointer_type
+        self.inference = inference
 
     def __call__(self,
                  hidden: Union[mx.sym.Symbol, mx.nd.NDArray],
@@ -286,8 +288,8 @@ class PointerOutputLayer(OutputLayer):
         Transformation to vocab size + source sentece size, weighted softmax using pointer nets. Returns probabilities.
 
         :param hidden: Decoder representation for n elements. Shape: (batch_size, trg_max_length, rnn_num_hidden ).
-        :param attention: Attention distributions over. Shape: (batch_size, trg_max_length, src_len)
-        :param context: Context on the source sentence. Shape: (batch_size, trg_max_length, encoder_num_hidden)
+        :param attention: Attention distributions over. Shape: (batch_size, trg_max_length, src_len), transformer shape (batch_size * trg_len (*beam_size) * num_attention_heads, src_len)
+        :param context: Context on the source sentence. Shape: (batch_size * src_len, encoder_num_hidden) ~ transfomer: (batch_size *trg_len, num_hidden). 
 
         :return: Logits. Shape(batch_size * trg_seq_len, self.vocab_size+src_len).
         """
@@ -330,11 +332,13 @@ class PointerOutputLayer(OutputLayer):
         switch_target_prob = mx.sym.Activation(switch_output, act_type='sigmoid', name=self.prefix+'_out') # shape (batch_size * trg_seq_len,)
 
         probs_src = attention # (batch_size * trg_seq_len, src_len)
-        # transformer: take average of attention heads, shape (batch_size * attention_heads, target_length, source_length)
+        # transformer: take average of attention heads, shape (batch_size * attention_heads, target_length, source_length) // inference: shape (batch_size * beam_size * attention_heads, target_length, source_length)
         # TODO: take average of attention heads? 
         if self.pointer_type == C.POINTER_NET_TRANSFORMER:
-            probs_src = probs_src.reshape(shape=(-4, -1, num_attention_heads, -2)) # (batch_size, attention_heads, target_length, source_length)
-            probs_src = mx.sym.mean(probs_src, axis=1)
+            if not self.inference:
+                probs_src = probs_src.reshape(shape=(-4, -1, num_attention_heads, -2)) # (batch_size * trg_seq_len, attention_heads, source_length)
+            probs_src = mx.sym.mean(probs_src, axis=1) # (batch_size (* beam_size) * trg_seq_len, source_length)
+            #probs_src = mx.sym.Custom(op_type="PrintValue", data=probs_src, print_name="probs_src")
         probs_trg = mx.sym.softmax(data=logits_trg, axis=1) # (batch_size * trg_seq_len, trg_vocab_size)
 
         weighted_probs_trg = mx.sym.broadcast_mul(probs_trg, switch_target_prob, name="mattpost_mul1") # (batch_size * trg_seq_len, trg_vocab_size)
@@ -371,9 +375,9 @@ def combine_heads(x: mx.sym.Symbol, depth_per_head: int, heads: int) -> mx.sym.S
     """
     # (batch, heads, length, depth_per_head)
     x = mx.sym.reshape(data=x, shape=(-4, -1, heads, 0, depth_per_head))
-    # (batch, length, heads, depth_per_head)
+    #(batch, length, heads, depth_per_head)
     x = mx.sym.transpose(x, axes=(0, 2, 1, 3))
-    # (batch, length, depth)
+    #(batch, length, depth)
     return mx.sym.reshape(x, shape=(-1, 0, depth_per_head * heads))
 
 
@@ -440,7 +444,7 @@ def dot_attention(queries: mx.sym.Symbol,
     if bias is not None:
         logits = mx.sym.broadcast_add(logits, bias, name='%sbias_add' % prefix)
 
-    probs = mx.sym.softmax(logits, axis=-1)
+    probs = mx.sym.softmax(logits, axis=-1) # (n, lq, lk)
     probs = mx.sym.Dropout(probs, p=dropout) if dropout > 0.0 else probs
 
     # (n, lq, lk) x (n, lk, dv) -> (n, lq, dv)
@@ -500,7 +504,7 @@ class MultiHeadAttentionBase:
         values = split_heads(values, self.depth_per_head, self.heads)
         lengths = broadcast_to_heads(lengths, self.heads, ndim=1, fold_heads=True) if lengths is not None else lengths
 
-        # (batch*heads, query_max_length, depth_per_head)
+        # contexts: (batch*heads, query_max_length, depth_per_head), probs: (batch_size *attention_heads, queries_max_length, source_length)
         contexts, probs = dot_attention(queries, keys, values,
                                  lengths=lengths, dropout=self.dropout, bias=bias, prefix=self.prefix)
 

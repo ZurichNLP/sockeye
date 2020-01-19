@@ -693,6 +693,7 @@ class EarlyStoppingTrainer:
         # Forward & Backward
         ####################
         model.run_forward_backward(batch, metric_train)
+        outs = model.module.get_outputs()
 
         ####################
         # Gradient rescaling

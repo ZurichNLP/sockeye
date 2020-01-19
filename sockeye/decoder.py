@@ -326,7 +326,7 @@ class TransformerDecoder(Decoder):
         new_states = [source_encoded, source_encoded_lengths]
         layer_caches = self._get_cache_per_layer(cast(List[mx.sym.Symbol], cache))
         for layer, layer_cache in zip(self.layers, layer_caches):
-            target = layer(target=target,
+            target, attention_probs, attention_context = layer(target=target,
                            target_bias=target_bias,
                            source=source_encoded,
                            source_bias=source_bias,
@@ -341,9 +341,16 @@ class TransformerDecoder(Decoder):
         target = mx.sym.reshape(target, shape=(-3, -1))
 
         # TODO(fhieber): no attention probs or context for now
-        attention_context = None
-        attention_probs = mx.sym.sum(mx.sym.zeros_like(source_encoded), axis=2, keepdims=False)
-
+        #attention_context = None
+        #attention_probs = mx.sym.sum(mx.sym.zeros_like(source_encoded), axis=2, keepdims=False)
+        # attention_context shape(beam_size, batch_size, num_hidden) -> make it like rnn's contexts (beam_size * batch_size, num_hidden)
+        attention_context = mx.sym.reshape(data=attention_context, shape=(-3,-1))
+        # attention_probs: shape (batch_size * beam_size * attention_heads, trg_len, src_len) ->
+        # shape as in rnns: (batch_size * beam_size * target_length * attention_heads, src_len)
+        attention_probs = mx.sym.reshape(data=attention_probs, shape=(-4, -1, self.config.attention_heads, -2)) # (batch_size * beam_size, attention_heads, trg_len, src_len)
+        attention_probs = mx.sym.transpose(data=attention_probs, axes=(0, 2, 1, 3)) # (batch_size * beam_size, trg_len, attention_heads, src_len)
+        attention_probs = mx.sym.reshape(data=attention_probs, shape=(-3,-2)) # (batch_size * beam_size *trg_len, attention_heads, src_len)
+        attention_probs = mx.sym.reshape(data=attention_probs, shape=(-3,-2)) # (batch_size * beam_size *trg_len * attention_heads, src_len)
         return target, attention_context, attention_probs, new_states
 
     def _get_cache_per_layer(self, cache: List[mx.sym.Symbol]) -> List[Dict[str, Optional[mx.sym.Symbol]]]:

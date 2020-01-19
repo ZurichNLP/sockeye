@@ -220,7 +220,7 @@ class InferenceModel(model.SockeyeModel):
             target_embed_prev, _, _ = self.embedding_target.encode(data=target_prev, data_length=None, seq_len=1)
 
             # decoder
-            # target_decoded: (batch_size, decoder_depth)
+            # target_decoded: (batch_size, decoder_depth), context (beam_size, batch_size, num_hidden)
             (target_decoded,
              attention_context,
              attention_probs,
@@ -240,8 +240,11 @@ class InferenceModel(model.SockeyeModel):
                     outputs = mx.sym.softmax(data=logits, name=C.SOFTMAX_NAME)
                 else:
 #                    target_embed_prev = mx.sym.Custom(op_type="PrintValue", data=target_embed_prev, print_name="TARG")
+                    num_attention_heads=None
+                    if self.config.pointer_net_type == C.POINTER_NET_TRANSFORMER:
+                        num_attention_heads=self.config.config_decoder.attention_heads
                     outputs = self.output_layer(target_decoded, attention=attention_probs,
-                                                context=attention_context, target_embed=target_embed_prev)
+                                                context=attention_context, target_embed=target_embed_prev, num_attention_heads=num_attention_heads)
 
             data_names = [C.TARGET_NAME] + state_names
             label_names = []  # type: List[str]
@@ -321,6 +324,9 @@ class InferenceModel(model.SockeyeModel):
             provide_data=self._get_decoder_data_shapes(bucket_key))
         self.decoder_module.forward(data_batch=batch, is_train=False)
         out, attention_probs, *model_state.states = self.decoder_module.get_outputs()
+        #out,  *model_state.states = self.decoder_module.get_outputs()
+        #print(out)
+        #exit(0)
         return out, attention_probs, model_state
 
     @property
