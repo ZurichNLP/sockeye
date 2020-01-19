@@ -686,6 +686,7 @@ def create_training_model(config: model.ModelConfig,
                                             default_bucket_key=train_iter.default_bucket_key,
                                             bucketing=not args.no_bucketing,
                                             gradient_compression_params=gradient_compression_params(args),
+                                            gradient_accumulation=args.update_interval > 1,
                                             fixed_param_names=args.fixed_param_names)
 
     return training_model
@@ -714,7 +715,8 @@ def create_optimizer_config(args: argparse.Namespace, source_vocab_sizes: List[i
     """
     optimizer_params = {'wd': args.weight_decay,
                         "learning_rate": args.initial_learning_rate}
-
+    
+    effective_batch_size = args.batch_size * args.update_interval
     gradient_clipping_threshold = none_if_negative(args.gradient_clipping_threshold)
     if gradient_clipping_threshold is None:
         logger.info("Gradient clipping threshold set to negative value. Will not perform gradient clipping.")
@@ -733,7 +735,7 @@ def create_optimizer_config(args: argparse.Namespace, source_vocab_sizes: List[i
         optimizer_params["rescale_grad"] = 1.0
     elif args.loss_normalization_type == C.LOSS_NORM_BATCH:
         # Making MXNet module API's default scaling factor explicit
-        optimizer_params["rescale_grad"] = 1.0 / args.batch_size
+        optimizer_params["rescale_grad"] = 1.0 / effective_batch_size
     # Manually specified params
     if args.optimizer_params:
         optimizer_params.update(args.optimizer_params)
@@ -760,8 +762,12 @@ def create_optimizer_config(args: argparse.Namespace, source_vocab_sizes: List[i
                              kvstore=args.kvstore,
                              initializer=weight_init,
                              gradient_clipping_type=gradient_clipping_type,
-                             gradient_clipping_threshold=gradient_clipping_threshold)
+                             gradient_clipping_threshold=gradient_clipping_threshold,
+                             update_interval=args.update_interval)
     config.set_lr_scheduler(lr_sched)
+    if args.update_interval > 1:
+        logger.info("Gradient accumulation over %d batches. Effective batch size: %d",
+                    args.update_interval, effective_batch_size)
     logger.info("Optimizer: %s", config)
     logger.info("Gradient Compression: %s", gradient_compression_params(args))
     return config

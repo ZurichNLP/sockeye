@@ -194,6 +194,7 @@ def test_seq_copy(name, train_params, translate_params, use_prepared_data, perpl
     ("Sort:transformer:transformer",
      "--encoder transformer --decoder transformer"
      " --batch-size 16 --batch-type sentence"
+     " --batch-size 8 --update-interval 1 --batch-type sentence"
      " --max-updates 6000"
      " --num-layers 2 --transformer-attention-heads 2 --transformer-model-size 32 --num-embed 32"
      " --transformer-dropout-attention 0.0 --transformer-dropout-act 0.0 --transformer-dropout-prepost 0.0"
@@ -205,6 +206,7 @@ def test_seq_copy(name, train_params, translate_params, use_prepared_data, perpl
     ("Sort:transformer_with_source_factor",
      "--encoder transformer --decoder transformer"
      " --batch-size 16 --batch-type sentence"
+     " --batch-size 8 --update-interval 2 --batch-type sentence"
      " --max-updates 6000"
      " --num-layers 2 --transformer-attention-heads 2 --transformer-model-size 32 --num-embed 32"
      " --transformer-dropout-attention 0.0 --transformer-dropout-act 0.0 --transformer-dropout-prepost 0.0"

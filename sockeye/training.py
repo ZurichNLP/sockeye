@@ -54,6 +54,7 @@ class TrainingModel(model.SockeyeModel):
     :param bucketing: If True bucketing will be used, if False the computation graph will always be
             unrolled to the full length.
     :param gradient_compression_params: Optional dictionary of gradient compression parameters.
+    :param gradient_accumulation: Whether to accumulate gradients over batches. Default: False.
     :param fixed_param_names: Optional list of params to fix during training (i.e. their values will not be trained).
     """
 
@@ -66,6 +67,7 @@ class TrainingModel(model.SockeyeModel):
                  default_bucket_key: Tuple[int, int],
                  bucketing: bool,
                  gradient_compression_params: Optional[Dict[str, Any]] = None,
+                 gradient_accumulation: bool = False,
                  fixed_param_names: Optional[List[str]] = None) -> None:
 
         super().__init__(config)
@@ -74,6 +76,7 @@ class TrainingModel(model.SockeyeModel):
         self.fixed_param_names = fixed_param_names
         self._bucketing = bucketing
         self._gradient_compression_params = gradient_compression_params
+        self._gradient_accumulation = gradient_accumulation
         self._initialize(provide_data, provide_label, default_bucket_key)
         self._monitor = None  # type: Optional[mx.monitor.Monitor]
 
@@ -206,7 +209,7 @@ class TrainingModel(model.SockeyeModel):
                          label_shapes=provide_label,
                          for_training=True,
                          force_rebind=True,
-                         grad_req='write')
+                         grad_req='add' if self._gradient_accumulation else 'write')
 
         self.module.symbol.save(os.path.join(self.output_dir, C.SYMBOL_NAME))
 
@@ -255,6 +258,12 @@ class TrainingModel(model.SockeyeModel):
                     continue
                 arr *= scale
 
+    def zero_gradients(self):
+        """
+        Sets all gradients to zero.
+        """
+        self.rescale_gradients(0.)
+    
     def prepare_batch(self, batch: mx.io.DataBatch):
         """
         Pre-fetches the next mini-batch.
@@ -406,7 +415,7 @@ class TrainState:
     Stores the state an EarlyStoppingTrainer instance.
     """
 
-    __slots__ = ['num_not_improved', 'epoch', 'checkpoint', 'best_checkpoint',
+    __slots__ = ['num_not_improved', 'epoch', 'checkpoint', 'best_checkpoint', 'batches',
                  'updates', 'samples', 'gradient_norm', 'gradients', 'metrics', 'start_tic',
                  'early_stopping_metric', 'best_metric', 'best_checkpoint']
 
@@ -415,6 +424,7 @@ class TrainState:
         self.epoch = 0
         self.checkpoint = 0
         self.best_checkpoint = 0
+        self.batches = 0
         self.updates = 0
         self.samples = 0
         self.gradient_norm = None  # type: Optional[float]
@@ -461,6 +471,7 @@ class EarlyStoppingTrainer:
                  target_vocab: vocab.Vocab) -> None:
         self.model = model
         self.optimizer_config = optimizer_config
+        self.update_interval = self.optimizer_config.update_interval
         self.max_params_files_to_keep = max_params_files_to_keep
         self.tflogger = TensorboardLogger(logdir=os.path.join(model.output_dir, C.TENSORBOARD_NAME),
                                           source_vocab=source_vocabs[0],
@@ -573,10 +584,10 @@ class EarlyStoppingTrainer:
             # STEP
             ######
             batch = next_data_batch
+            self.state.batches += 1
             self._step(self.model, batch, checkpoint_frequency, metric_train, metric_loss)
             batch_num_samples = batch.data[0].shape[0]
             batch_num_tokens = batch.data[0].shape[1] * batch_num_samples
-            self.state.updates += 1
             self.state.samples += batch_num_samples
 
             if not train_iter.iter_next():
@@ -586,7 +597,7 @@ class EarlyStoppingTrainer:
             next_data_batch = train_iter.next()
             self.model.prepare_batch(next_data_batch)
 
-            speedometer(self.state.epoch, self.state.updates, batch_num_samples, batch_num_tokens, metric_train)
+            speedometer(self.state.epoch, self.state.batches, self.state.updates, batch_num_samples, batch_num_tokens, metric_train)
 
             ############
             # CHECKPOINT
@@ -694,24 +705,6 @@ class EarlyStoppingTrainer:
         ####################
         model.run_forward_backward(batch, metric_train)
 
-        ####################
-        # Gradient rescaling
-        ####################
-        gradient_norm = None
-        if self.state.updates > 0 and (self.state.updates + 1) % checkpoint_frequency == 0:
-            # compute values for logging to metrics (before rescaling...)
-            gradient_norm = self.state.gradient_norm = model.get_global_gradient_norm()
-            self.state.gradients = model.get_gradients()
-
-        # note: C.GRADIENT_CLIPPING_TYPE_ABS is handled by the mxnet optimizer directly
-        if self.optimizer_config.gradient_clipping_type == C.GRADIENT_CLIPPING_TYPE_NORM:
-            if gradient_norm is None:
-                gradient_norm = model.get_global_gradient_norm()
-            # clip gradients
-            if gradient_norm > self.optimizer_config.gradient_clipping_threshold:
-                ratio = self.optimizer_config.gradient_clipping_threshold / gradient_norm
-                model.rescale_gradients(ratio)
-
         # If using an extended optimizer, provide extra state information about the current batch
         optimizer = model.optimizer
         if metric_loss is not None: #and isinstance(optimizer, SockeyeOptimizer):
@@ -727,6 +720,31 @@ class EarlyStoppingTrainer:
         # UPDATE
         ########
         model.update()
+        
+        if self.update_interval == 1 or self.state.batches % self.update_interval == 0:
+
+            # Gradient rescaling
+            gradient_norm = None
+            if self.state.updates > 0 and (self.state.updates + 1) % checkpoint_frequency == 0:
+                # compute values for logging to metrics (before rescaling...)
+                gradient_norm = self.state.gradient_norm = model.get_global_gradient_norm()
+                self.state.gradients = model.get_gradients()
+
+            # note: C.GRADIENT_CLIPPING_TYPE_ABS is handled by the mxnet optimizer directly
+            if self.optimizer_config.gradient_clipping_type == C.GRADIENT_CLIPPING_TYPE_NORM:
+                if gradient_norm is None:
+                    gradient_norm = model.get_global_gradient_norm()
+                # clip gradients
+                if gradient_norm > self.optimizer_config.gradient_clipping_threshold:
+                    ratio = self.optimizer_config.gradient_clipping_threshold / gradient_norm
+                    model.rescale_gradients(ratio)
+
+            model.update()
+
+            if self.update_interval > 1:
+                model.zero_gradients()
+
+            self.state.updates += 1
 
         if model.monitor is not None:
             results = model.monitor.toc()
@@ -1107,8 +1125,8 @@ class Speedometer:
         self.tokens = 0
         self.msg = 'Epoch[%d] Batch [%d]\tSpeed: %.2f samples/sec %.2f tokens/sec %.2f updates/sec'
 
-    def __call__(self, epoch: int, updates: int, samples: int, tokens: int, metric: Optional[mx.metric.EvalMetric]):
-        count = updates
+    def __call__(self, epoch: int, batches: int, updates: int, samples: int, tokens: int, metric: Optional[mx.metric.EvalMetric]):
+        count = batches
         if self.last_count > count:
             self.init = False
         self.last_count = count
@@ -1119,6 +1137,8 @@ class Speedometer:
             if count % self.frequency == 0:
                 toc = (time.time() - self.tic)
                 updates_per_sec = self.frequency / toc
+                update_interval = batches / updates
+                updates_per_sec = self.frequency / update_interval / toc
                 samples_per_sec = self.samples / toc
                 tokens_per_sec = self.tokens / toc
                 self.samples = 0
