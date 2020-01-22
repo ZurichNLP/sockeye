@@ -249,13 +249,43 @@ class OnlineMeanAndVariance:
             return float('nan')
         else:
             return self._M2 / self._count
+        
+        
+def contains_hyptheses_with_eos(indices: mx.nd.NDArray,
+                                eos_ids: List[int]):
+    is_eos = mx.nd.zeros_like(indices)
+    for i in eos_ids:
+        mask = (indices == i)
+        is_eos += mask
+    number_of_topk_with_eos = int(mx.nd.sum(mask).asnumpy()[0])
+    return number_of_topk_with_eos, mask
 
+def remove_hypotheses_with_eos(folded_scores: mx.nd.NDArray,
+                               k: int, 
+                               number_of_topk_with_eos: int,
+                               mask: mx.nd.NDArray):
+    
+    
+    has_eos =  mx.nd.sum(mask, axis=1) # (batch_size, ): 1 if contains eos, 0 otherwise
+    keep_scores = has_eos < 1 # inverted: (batch_size, ): 0 if contains eos, 1 otherwise
+    print(number_of_topk_with_eos)
+    add = mx.nd.ones(shape=(number_of_topk_with_eos,)) # extend keep_scores with number of new topk entries (keep those)
+    keep_scores = mx.nd.concat(keep_scores, add)
+    values, indices = mx.nd.topk(folded_scores, axis=1, k=k+number_of_topk_with_eos, ret_typ='both', is_ascend=True)
+    # remove hypotheses that contain eos from new topk
+    indices = mx.nd.contrib.boolean_mask(indices, keep_scores)
+    values = mx.nd.contrib.boolean_mask(values, keep_scores)
+    print(indices.shape)
+    print(keep_scores)
+    return values, indices
 
 def topk(scores: mx.nd.NDArray,
          k: int,
          batch_size: int,
          offset: mx.nd.NDArray,
-         use_mxnet_topk: bool) -> Tuple[mx.nd.NDArray, mx.nd.NDArray, mx.nd.NDArray]:
+         use_mxnet_topk: bool,
+         eos_id: int,
+         skip_eos: Optional[bool] = False) -> Tuple[mx.nd.NDArray, mx.nd.NDArray, mx.nd.NDArray]:
     """
     Get the lowest k elements per sentence from a `scores` matrix.
 
@@ -267,11 +297,18 @@ def topk(scores: mx.nd.NDArray,
     :return: The row indices, column indices and values of the k smallest items in matrix.
     """
     # (batch_size, beam_size * target_vocab_size)
-    folded_scores = scores.reshape((batch_size, k * scores.shape[-1]))
+    folded_scores = scores.reshape((batch_size, k * scores.shape[-1])) # (batch_size, beam * target_vocabulary_size)
+    eos_ids = [eos_id * beam for beam in range(1, k+1)]
 
     if use_mxnet_topk:
         # pylint: disable=unbalanced-tuple-unpacking
         values, indices = mx.nd.topk(folded_scores, axis=1, k=k, ret_typ='both', is_ascend=True)
+        if skip_eos:
+            number_of_topk_with_eos, mask = contains_hyptheses_with_eos(indices, eos_ids)
+            while(number_of_topk_with_eos > 0):
+                      values,indices = remove_hypotheses_with_eos(folded_scores, k, number_of_topk_with_eos, mask)
+                      number_of_topk_with_eos, mask = contains_hyptheses_with_eos(indices, eos_ids)
+               
         best_hyp_indices, best_word_indices = mx.nd.array(np.unravel_index(indices.astype(np.int32).asnumpy().ravel(),
                                                                            scores.shape),
                                                           dtype='int32',

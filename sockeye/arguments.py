@@ -1224,6 +1224,10 @@ def add_inference_args(params):
                                default=False,
                                action='store_true',
                                help='Annotate pointed words in the output')
+    decode_params.add_argument('--minimum-length',
+                               default=1,
+                               type=int,
+                               help='Minimum length of translation. Default: %(default)s')
 
 
 def add_evaluate_args(params):

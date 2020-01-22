@@ -967,6 +967,8 @@ class Translator:
     :param avoid_list: Global list of phrases to exclude from the output.
     :param store_beam: If True, store the beam search history and return it in the TranslatorOutput.
     :param strip_unknown_words: If True, removes any <unk> symbols from outputs.
+    :param mark_pointed_words: If True, mark words copied from source with [].
+    :param min_length: Minimum length of generated translation(s).
     """
 
     def __init__(self,
@@ -983,7 +985,8 @@ class Translator:
                  avoid_list: Optional[str] = None,
                  store_beam: bool = False,
                  strip_unknown_words: bool = False,
-                 mark_pointed_words: Optional[bool] = False) -> None:
+                 mark_pointed_words: Optional[bool] = False,
+                 min_length: Optional[int] = 1) -> None:
         self.context = context
         self.length_penalty = length_penalty
         self.beam_prune = beam_prune
@@ -1001,6 +1004,7 @@ class Translator:
         if strip_unknown_words:
             self.strip_ids.add(self.unk_id)
         self.mark_pointed_words = mark_pointed_words
+        self.min_length = min_length
         self.models = models
         utils.check_condition(all(self.source_with_eos == m.source_with_eos for m in models),
                               "The source_with_eos property must match across models.")
@@ -1039,7 +1043,8 @@ class Translator:
                              k=self.beam_size,
                              batch_size=self.batch_size,
                              offset=self.offset,
-                             use_mxnet_topk=self.context != mx.cpu())  # MXNet implementation is faster on GPUs
+                             use_mxnet_topk=self.context != mx.cpu(),
+                             eos_id=self.vocab_target[C.EOS_SYMBOL])  # MXNet implementation is faster on GPUs
 
         self._sort_by_index = SortByIndex()
         self._sort_by_index.initialize(ctx=self.context)
@@ -1242,6 +1247,10 @@ class Translator:
         for j, trans_input in enumerate(trans_inputs):
             num_tokens = len(trans_input)
             max_output_lengths.append(self.models[0].get_max_output_length(data_io.get_bucket(num_tokens, self.buckets_source)))
+            # override if --min-length given and > calculated output length
+            for i,l in enumerate(max_output_lengths):
+                if self.min_length > l:
+                    max_output_lengths[i] = self.min_length
             source[j, :num_tokens, 0] = data_io.tokens2ids(trans_input.tokens, self.source_vocabs[0])
 
             factors = trans_input.factors if trans_input.factors is not None else []
@@ -1288,7 +1297,7 @@ class Translator:
             source_inv = dict((x, y) for x, y in enumerate(trans_input.tokens))
             def id2str(word_id: int):
                 if word_id >= len(self.vocab_target):
-                    word_id = word_id - len(self.vocab_target) - 1
+                    word_id = word_id - len(self.vocab_target) # removed the -1. if word_id == len(self.vocab_target), word_id has to be 0, not -1
                     if self.mark_pointed_words:
                         return '[{}/{}]'.format(source_inv.get(word_id, 'OOB'), word_id)
                     else:
@@ -1439,6 +1448,8 @@ class Translator:
                               "Models must agree on encoded sequence length")
         # Maximum output length
         max_output_length = self.models[0].get_max_output_length(source_length)
+        if self.min_length > max_output_length:
+            max_output_length = self.min_length
 
         # General data structure: each row has batch_size * beam blocks for the 1st sentence, with a full beam,
         # then the next block for the 2nd sentence and so on
@@ -1557,7 +1568,9 @@ class Translator:
 
             # (3) Get beam_size winning hypotheses for each sentence block separately. Only look as
             # far as the active beam size for each sentence.
-            best_hyp_indices, best_word_indices, scores_accumulated = self._topk(scores)
+            if t < self.min_length:
+                skip_eos =True
+            best_hyp_indices, best_word_indices, scores_accumulated = self._topk(scores, skip_eos=skip_eos)
 
             # Constraints for constrained decoding are processed sentence by sentence
             if any(raw_constraint_list):
@@ -1579,13 +1592,13 @@ class Translator:
             # Map from restricted to full vocab ids if needed
             if self.restrict_lexicon:
                 best_word_indices = vocab_slice_ids.take(best_word_indices)
-
+                
             # (4) Reorder fixed-size beam data according to best_hyp_indices (ascending)
             finished, lengths, attention_scores = self._sort_by_index.forward(best_hyp_indices,
                                                                               finished,
                                                                               lengths,
                                                                               attention_scores)
-
+            
             # (5) Normalize the scores of newly finished hypotheses. Note that after this until the
             # next call to topk(), hypotheses may not be in sorted order.
             finished, scores_accumulated, lengths = self._update_finished.forward(best_word_indices,
