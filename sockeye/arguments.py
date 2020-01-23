@@ -1228,6 +1228,10 @@ def add_inference_args(params):
                                default=1,
                                type=int,
                                help='Minimum length of translation. Default: %(default)s')
+    decode_params.add_argument('--copy-unknown',
+                               default=False,
+                               action='store_true',
+                               help='Replace unknown words in the output with the source word with the highest probability (only possible for models with pointer networks) . Default: %(default)s')
 
 
 def add_evaluate_args(params):

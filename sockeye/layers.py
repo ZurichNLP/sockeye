@@ -225,6 +225,11 @@ class OutputLayer:
                                     bias=bias,
                                     flatten=False)
 
+#class ONMTPointerOutputLayer(OutputLayer):
+    #"""
+    #Defines the output layer of Sockeye decoders with pointer networks in the same fashion as implemented in OpenNMT-py (uses only linear projection, no FFNN's).
+    #"""
+
 
 class PointerOutputLayer(OutputLayer):
     """

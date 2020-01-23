@@ -324,9 +324,7 @@ class InferenceModel(model.SockeyeModel):
             provide_data=self._get_decoder_data_shapes(bucket_key))
         self.decoder_module.forward(data_batch=batch, is_train=False)
         out, attention_probs, *model_state.states = self.decoder_module.get_outputs()
-        #out,  *model_state.states = self.decoder_module.get_outputs()
-        #print(out)
-        #exit(0)
+    
         return out, attention_probs, model_state
 
     @property
@@ -986,7 +984,8 @@ class Translator:
                  store_beam: bool = False,
                  strip_unknown_words: bool = False,
                  mark_pointed_words: Optional[bool] = False,
-                 min_length: Optional[int] = 1) -> None:
+                 min_length: Optional[int] = 1, 
+                 copy_unk: Optional[bool] = False) -> None:
         self.context = context
         self.length_penalty = length_penalty
         self.beam_prune = beam_prune
@@ -994,6 +993,7 @@ class Translator:
         self.source_vocabs = source_vocabs
         self.vocab_target = target_vocab
         self.vocab_target_inv = vocab.reverse_vocab(self.vocab_target)
+        self.vocab_source_inv = vocab.reverse_vocab(self.source_vocabs[0])
         self.restrict_lexicon = restrict_lexicon
         self.store_beam = store_beam
         self.start_id = self.vocab_target[C.BOS_SYMBOL]
@@ -1005,6 +1005,7 @@ class Translator:
             self.strip_ids.add(self.unk_id)
         self.mark_pointed_words = mark_pointed_words
         self.min_length = min_length
+        self.copy_unk = copy_unk
         self.models = models
         utils.check_condition(all(self.source_with_eos == m.source_with_eos for m in models),
                               "The source_with_eos property must match across models.")
@@ -1043,9 +1044,7 @@ class Translator:
                              k=self.beam_size,
                              batch_size=self.batch_size,
                              offset=self.offset,
-                             use_mxnet_topk=self.context != mx.cpu(),
-                             eos_id=self.vocab_target[C.EOS_SYMBOL],
-                             pad_id=self.vocab_target[C.PAD_SYMBOL])  # MXNet implementation is faster on GPUs
+                             use_mxnet_topk=self.context != mx.cpu())  # MXNet implementation is faster on GPUs
 
         self._sort_by_index = SortByIndex()
         self._sort_by_index.initialize(ctx=self.context)
@@ -1546,7 +1545,9 @@ class Translator:
             eos_avoid_states = constrained.AvoidBatch(self.batch_size, self.beam_size,
                                                   global_avoid_trie=self.eos_avoid_trie)
             eos_avoid_states.consume(best_word_indices)
-
+        
+        if self.copy_unk:
+            self.unk_id = self.vocab_target[C.UNK_SYMBOL]
         # Records items in the beam that are inactive. At the beginning (t==1), there is only one valid or active
         # item on the beam for each sentence
         inactive = mx.nd.ones((self.batch_size * self.beam_size), dtype='int32', ctx=self.context)
@@ -1597,7 +1598,7 @@ class Translator:
                                                          best_word_indices,
                                                          scores_accumulated,
                                                          self.context)
-
+                
             else:
                 # All rows are now active (after special treatment of start state at t=1)
                 inactive[:] = 0
@@ -1605,6 +1606,41 @@ class Translator:
             # Map from restricted to full vocab ids if needed
             if self.restrict_lexicon:
                 best_word_indices = vocab_slice_ids.take(best_word_indices)
+                
+            # for pointer networks: if --copy-unkown given, replace <unk> in output with the best scoring source word
+            if self.copy_unk and (best_word_indices == self.unk_id).sum(axis=0).asnumpy()[0]  > 0:
+           
+                # with pointer networks: scores(batch*beam, target_vocab +src_len)
+                (batch_beam, vocab_size_src_len) = scores.shape
+                target_vocab_size = len(self.vocab_target)
+                
+                # source probabilities (batch *beam, src_len)
+                src_word_probs = mx.nd.slice(scores, begin=(0, target_vocab_size), end=(batch_beam, vocab_size_src_len), step=(1,1))
+                # get indices + values of best source word for each beam
+                best_src_hyp_indices, best_src_word_indices, src_scores_accumulated  = self._topk(src_word_probs)
+                # shift best_src_word_indices by target_vocab_size to have the actual indices
+                best_src_word_indices += target_vocab_size
+                
+                ##replace best_word_indices + scores_accumulated
+                mask_unkown = (best_word_indices == self.unk_id).astype(dtype=best_src_word_indices.dtype) # dtype=int32
+                best_src_word_to_replace = best_src_word_indices * mask_unkown # best_src_word_to_replace: id for words unk_id will be replaced with, 0 otherwise
+                
+                for index in best_src_word_to_replace.asnumpy():
+                    if not index == 0:
+                        index -= target_vocab_size 
+                        logger.info("Replacing <unk> with {}".format(self.vocab_source_inv[index]))
+               
+                # inverse masks: unk_id set to 0, rest to 1 (needed to set orginal values of unk_id to 0, then add new ids + scores from src
+                mask_unkown_inv = (mask_unkown == 0)
+                best_word_indices = best_word_indices * mask_unkown_inv
+                best_word_indices += best_src_word_to_replace
+                
+                # TODO: replace scores of <unk> with scores of source word (changes beam search)?
+                #mask_unkown_scores = mask_unkown.expand_dims(axis=1).astype(dtype=src_scores_accumulated.dtype)
+                #src_scores_accumulated_to_replace = src_scores_accumulated * mask_unkown_scores # src_scores_accumulated_to_replace: score for words where unk_id will be replaced, 0 otherwise
+                #mask_unkown_scores_inv = (mask_unkown_scores == 0)
+                #scores_accumulated = scores_accumulated * mask_unkown_scores_inv
+                #scores_accumulated += src_scores_accumulated_to_replace
                 
             # (4) Reorder fixed-size beam data according to best_hyp_indices (ascending)
             finished, lengths, attention_scores = self._sort_by_index.forward(best_hyp_indices,

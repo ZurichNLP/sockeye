@@ -254,10 +254,7 @@ def topk(scores: mx.nd.NDArray,
          k: int,
          batch_size: int,
          offset: mx.nd.NDArray,
-         use_mxnet_topk: bool,
-         eos_id: int,
-         pad_id: int,
-         skip_eos: Optional[bool] = False) -> Tuple[mx.nd.NDArray, mx.nd.NDArray, mx.nd.NDArray]:
+         use_mxnet_topk: bool) -> Tuple[mx.nd.NDArray, mx.nd.NDArray, mx.nd.NDArray]:
     """
     Get the lowest k elements per sentence from a `scores` matrix.
 
@@ -268,8 +265,8 @@ def topk(scores: mx.nd.NDArray,
     :param use_mxnet_topk: True to use the mxnet implementation or False to use the numpy one.
     :return: The row indices, column indices and values of the k smallest items in matrix.
     """
-    # (batch_size, beam_size * target_vocab_size)
-    folded_scores = scores.reshape((batch_size, k * scores.shape[-1])) # (batch_size, beam * target_vocabulary_size)
+    # (batch_size, beam_size * target_vocab_size (+ src_len)) 
+    folded_scores = scores.reshape((batch_size, k * scores.shape[-1]))
     if use_mxnet_topk:
         # pylint: disable=unbalanced-tuple-unpacking
         values, indices = mx.nd.topk(folded_scores, axis=1, k=k, ret_typ='both', is_ascend=True)
