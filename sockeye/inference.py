@@ -1044,7 +1044,8 @@ class Translator:
                              batch_size=self.batch_size,
                              offset=self.offset,
                              use_mxnet_topk=self.context != mx.cpu(),
-                             eos_id=self.vocab_target[C.EOS_SYMBOL])  # MXNet implementation is faster on GPUs
+                             eos_id=self.vocab_target[C.EOS_SYMBOL],
+                             pad_id=self.vocab_target[C.PAD_SYMBOL])  # MXNet implementation is faster on GPUs
 
         self._sort_by_index = SortByIndex()
         self._sort_by_index.initialize(ctx=self.context)
@@ -1068,6 +1069,7 @@ class Translator:
                 if self.unk_id in phrase_ids:
                     logger.warning("Global avoid phrase '%s' contains an %s; this may indicate improper preprocessing.", ' '.join(phrase), C.UNK_SYMBOL)
                 self.global_avoid_trie.add_phrase(phrase_ids)
+
 
         logger.info("Translator (%d model(s) beam_size=%d beam_prune=%s beam_search_stop=%s "
                     "ensemble_mode=%s batch_size=%d buckets_source=%s avoiding=%d)",
@@ -1537,6 +1539,13 @@ class Translator:
                                                   avoid_list=raw_avoid_list,
                                                   global_avoid_trie=self.global_avoid_trie)
             avoid_states.consume(best_word_indices)
+        
+        if self.min_length > 1:
+            self.eos_avoid_trie = constrained.AvoidTrie()
+            self.eos_avoid_trie.add_phrase([self.vocab_target[C.EOS_SYMBOL]]) ## maybe needs C.PAD_ID too?
+            eos_avoid_states = constrained.AvoidBatch(self.batch_size, self.beam_size,
+                                                  global_avoid_trie=self.eos_avoid_trie)
+            eos_avoid_states.consume(best_word_indices)
 
         # Records items in the beam that are inactive. At the beginning (t==1), there is only one valid or active
         # item on the beam for each sentence
@@ -1558,9 +1567,15 @@ class Translator:
 
             # (2) Update scores. Special treatment for finished and inactive rows. Inactive rows are inf everywhere;
             # finished rows are inf everywhere except column zero, which holds the accumulated model score
+
             scores = self._update_scores.forward(scores, finished, inactive, scores_accumulated, self.inf_array, pad_dist)
 
             # Mark entries that should be blocked as having a score of np.inf
+            if t < self.min_length:
+                eos_block_indices = eos_avoid_states.avoid()
+                if len(eos_block_indices) > 0:
+                    scores[eos_block_indices] = np.inf
+                
             if self.global_avoid_trie or any(raw_avoid_list):
                 block_indices = avoid_states.avoid()
                 if len(block_indices) > 0:
@@ -1568,9 +1583,7 @@ class Translator:
 
             # (3) Get beam_size winning hypotheses for each sentence block separately. Only look as
             # far as the active beam size for each sentence.
-            if t < self.min_length:
-                skip_eos =True
-            best_hyp_indices, best_word_indices, scores_accumulated = self._topk(scores, skip_eos=skip_eos)
+            best_hyp_indices, best_word_indices, scores_accumulated = self._topk(scores)
 
             # Constraints for constrained decoding are processed sentence by sentence
             if any(raw_constraint_list):
