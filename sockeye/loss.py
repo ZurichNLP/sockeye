@@ -295,10 +295,11 @@ class AttentionMonotonicity(Loss):
         positions = mx.sym.broadcast_mul(p, positions) # shape(batch, target_length, source_length), values in source_length = arange(source_length) 
         
         
-        ## TODO: remove padding for scoring - target yes, what about source positions? 
+        ## no need to remove padding from source, padded positions are 0 in attention scores
         positionally_weighted_attention = mx.sym.broadcast_mul(attention_scores, positions) # shape(batch_size, target_length, source_length (attention_score*position))
         ### take average over sequences
         avg = mx.sym.mean(positionally_weighted_attention, axis=2) # shape (batch, target_length)
+        
         ## set padded positions in target to zero (we dont care about alignment scores from padded tokens)
         mask = (target_words != C.PAD_ID) # target_words (batch_size, target_length), mask: 0 where padded, 1 otherwise
         avg_r = avg.reshape(shape=(-3,))

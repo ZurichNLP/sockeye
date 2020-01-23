@@ -273,7 +273,7 @@ class TransformerDecoder(Decoder):
         if self.config.dropout_prepost > 0.0:
             target = mx.sym.Dropout(data=target, p=self.config.dropout_prepost)
 
-        attention_scores_list = [] # length: layers, attention_scores shape: (batch_size * attention_heads, source_length, depth)
+        attention_scores_list = [] # length: layers, attention_scores shape: (batch_size * attention_heads, target_length, source_length)
         for layer in self.layers:
             target, attention_scores = layer(target, target_bias, source_encoded, source_bias)
             attention_scores_list.append(attention_scores) 

@@ -891,6 +891,7 @@ class EarlyStoppingTrainer:
             logger.info("Training started.")
 
         metric_train, metric_val, metric_loss = self._create_metrics(metrics, self.model.optimizer, self.model.loss)
+        attention_monotonicity_loss = None
         if hasattr(self.model, 'attention_monotonicity_loss')  and self.model.attention_monotonicity_loss is not None:
             attention_monotonicity_loss = self.model.attention_monotonicity_loss.create_metric()
 
