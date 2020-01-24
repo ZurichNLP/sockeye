@@ -405,6 +405,13 @@ def add_pointer_args(params):
                         type=int,
                         default=2,
                         help='Shortest word length that can be pointed to')
+    params.add_argument('--pointer-num-hidden',
+                        type=int,
+                        default=128,
+                        help='Hidden layer dimension of pointer networks. %(default)s.')
+    params.add_argument('--simple-pointer',
+                        action='store_true',
+                        help='Use simple pointer network (get probability for target vocab words from target embedding (do not consider decoder hidden states and context vectors)). %(default)s.')
 
 
 def add_bucketing_args(params):
@@ -1232,6 +1239,7 @@ def add_inference_args(params):
                                default=False,
                                action='store_true',
                                help='Replace unknown words in the output with the source word with the highest probability (only possible for models with pointer networks) . Default: %(default)s')
+
 
 
 def add_evaluate_args(params):

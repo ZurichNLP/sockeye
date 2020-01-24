@@ -227,7 +227,8 @@ class InferenceModel(model.SockeyeModel):
              states) = self.decoder.decode_step(decode_step,
                                                 target_embed_prev,
                                                 source_encoded_seq_len,
-                                                *states)
+                                                *states, 
+                                                beam_size=self.beam_size)
             if self.decoder_return_logit_inputs:
                 # skip output layer in graph
                 outputs = mx.sym.identity(target_decoded, name=C.LOGIT_INPUTS_NAME)

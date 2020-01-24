@@ -658,7 +658,9 @@ def create_model_config(args: argparse.Namespace,
                                      weight_tying_type=args.weight_tying_type if args.weight_tying else None,
                                      weight_normalization=args.weight_normalization,
                                      use_pointer_nets=args.use_pointer_nets,
+                                     pointer_num_hidden=args.pointer_num_hidden,
                                      pointer_net_type=args.pointer_nets_type,
+                                     simple_pointer=args.simple_pointer,
                                      lhuc=args.lhuc is not None)
     return model_config
 

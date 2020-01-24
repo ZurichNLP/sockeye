@@ -224,12 +224,104 @@ class OutputLayer:
                                     weight=weight,
                                     bias=bias,
                                     flatten=False)
+    
+class SimplePointerOutputLayer(OutputLayer):
+    """
+    Defines the output layer of Sockeye decoders. Supports weight tying and weight normalization.
 
-#class ONMTPointerOutputLayer(OutputLayer):
-    #"""
-    #Defines the output layer of Sockeye decoders with pointer networks in the same fashion as implemented in OpenNMT-py (uses only linear projection, no FFNN's).
-    #"""
+    :param hidden_size: Decoder hidden size.
+    :param encoder_hidden_size: Encoder hidden size.
+    :param vocab_size: Target vocabulary size.
+    :param weight_normalization: Whether to apply weight normalization.
+    :param prefix: Prefix used for naming.
+    """
 
+    def __init__(self,
+                 hidden_size: int,
+                 encoder_hidden_size: int,
+                 target_embed_size: int,
+                 vocab_size: int,
+                 weight: Optional[mx.sym.Symbol],
+                 weight_normalization: bool,
+                 prefix: str = C.POINTER_NET_OUTPUT_LAYER_PREFIX,
+                 pointer_num_hidden: Optional[int] = 128,
+                 pointer_type: Optional[str] = C.POINTER_NET_RNN,
+                 inference: Optional[bool] = False) -> None:
+
+        super().__init__(hidden_size, vocab_size, weight, weight_normalization, prefix)
+
+        self.hidden_layer_dim = pointer_num_hidden
+        self.uniform_range = 0.1
+
+        # Switching network weights, target embed -> internal
+        self.weights_target = mx.sym.Variable("%spointer_weight3" % self.prefix, init=mx.init.Uniform(self.uniform_range),
+                                              shape=(self.hidden_layer_dim, target_embed_size))
+        self.bias_target = mx.sym.Variable("%spointer_bias3" % self.prefix, init=mx.init.Zero())
+
+        # Output layer
+        self.weights_output = mx.sym.Variable("%spointer_output" % self.prefix, init=mx.init.Uniform(self.uniform_range),
+                                              shape=(1, self.hidden_layer_dim))
+        self.bias_output = mx.sym.Variable("%spointer_bias_output" % self.prefix, init=mx.init.Zero())
+        
+        self.pointer_type = pointer_type
+        self.inference = inference
+
+    def __call__(self,
+                 hidden: Union[mx.sym.Symbol, mx.nd.NDArray],
+                 attention: Optional[Union[mx.sym.Symbol, mx.nd.NDArray]] = None,
+                 context: Optional[Union[mx.sym.Symbol, mx.nd.NDArray]] = None,
+                 target_embed: Optional[Union[mx.sym.Symbol, mx.nd.NDArray]] = None,
+                 weight: Optional[mx.nd.NDArray] = None,
+                 bias: Optional[mx.nd.NDArray] = None,
+                 num_attention_heads: Optional[int] = None):
+        """
+        Transformation to vocab size + source sentece size, weighted softmax using pointer nets. Returns probabilities.
+
+        :param hidden: Decoder representation for n elements. Shape: (batch_size, trg_max_length, rnn_num_hidden ).
+        :param attention: Attention distributions over. Shape: (batch_size * trg_max_length, src_len), transformer shape (batch_size (*beam_size) * trg_len  * num_attention_heads, src_len)
+      
+        :return: Logits. Shape(batch_size * trg_seq_len, self.vocab_size+src_len).
+        """
+        # logits: (batch_size * trg_seq_len, trg_vocab_size)
+        logits_trg = super().__call__(hidden, weight=weight, bias=bias)
+
+        # decoder.py RecurrentDecoder._step()
+        # (trg_len, hidden_layer_dim)
+
+        switch_target = mx.sym.FullyConnected(data=target_embed,
+                                              num_hidden=self.hidden_layer_dim,
+                                              weight=self.weights_target,
+                                              bias=self.bias_target,
+                                              flatten=False,
+                                              name=self.prefix + '_target_embed_layer')
+
+        switch_output = mx.sym.Activation(switch_target,
+                                          act_type='sigmoid', name=self.prefix + '_layer1')
+
+        switch_output = mx.sym.FullyConnected(data=switch_output,
+                                              num_hidden=1,
+                                              weight=self.weights_output,
+                                              bias=self.bias_output,
+                                              flatten=False,
+                                              name=self.prefix + '_output_layer')
+
+        switch_target_prob = mx.sym.Activation(switch_output, act_type='sigmoid', name=self.prefix+'_out') # shape (batch_size * trg_seq_len,)
+
+        probs_src = attention # (batch_size * trg_seq_len, src_len)
+        # transformer: take average of attention heads, shape (batch_size * attention_heads, target_length, source_length) // inference: shape (batch_size * beam_size * attention_heads, target_length, source_length)
+        # TODO: take average of attention heads? 
+        if self.pointer_type == C.POINTER_NET_TRANSFORMER:
+            if not self.inference:
+                probs_src = probs_src.reshape(shape=(-4, -1, num_attention_heads, -2)) # (batch_size * trg_seq_len, attention_heads, source_length)
+            probs_src = mx.sym.mean(probs_src, axis=1) # (batch_size (* beam_size) * trg_seq_len, source_length)
+            #probs_src = mx.sym.Custom(op_type="PrintValue", data=probs_src, print_name="probs_src")
+        probs_trg = mx.sym.softmax(data=logits_trg, axis=1) # (batch_size * trg_seq_len, trg_vocab_size)
+
+        weighted_probs_trg = mx.sym.broadcast_mul(probs_trg, switch_target_prob, name="simple_pointer_mul1") # (batch_size * trg_seq_len, trg_vocab_size)
+        weighted_probs_src = mx.sym.broadcast_mul(probs_src, 1.0 - switch_target_prob, name="simple_pointer_mul2") # (batch_size * trg_seq_len, src_len)
+
+        result = mx.sym.concat(weighted_probs_trg, weighted_probs_src, dim=1, name=C.SOFTMAX_OUTPUT_NAME) # (batch_size * trg_seq_len, self.vocab_size+src_len)
+        return result 
 
 class PointerOutputLayer(OutputLayer):
     """
@@ -250,12 +342,13 @@ class PointerOutputLayer(OutputLayer):
                  weight: Optional[mx.sym.Symbol],
                  weight_normalization: bool,
                  prefix: str = C.POINTER_NET_OUTPUT_LAYER_PREFIX,
+                 pointer_num_hidden: Optional[int] = 128,
                  pointer_type: Optional[str] = C.POINTER_NET_RNN,
                  inference: Optional[bool] = False) -> None:
 
         super().__init__(hidden_size, vocab_size, weight, weight_normalization, prefix)
 
-        self.hidden_layer_dim = 128
+        self.hidden_layer_dim = pointer_num_hidden
         self.uniform_range = 0.1
 
         # Switching network weights, hidden state -> internal
@@ -293,7 +386,7 @@ class PointerOutputLayer(OutputLayer):
         Transformation to vocab size + source sentece size, weighted softmax using pointer nets. Returns probabilities.
 
         :param hidden: Decoder representation for n elements. Shape: (batch_size, trg_max_length, rnn_num_hidden ).
-        :param attention: Attention distributions over. Shape: (batch_size, trg_max_length, src_len), transformer shape (batch_size * trg_len (*beam_size) * num_attention_heads, src_len)
+        :param attention: Attention distributions over. Shape: (batch_size * trg_max_length, src_len), transformer shape (batch_size (*beam_size) * trg_len  * num_attention_heads, src_len)
         :param context: Context on the source sentence. Shape: (batch_size * src_len, encoder_num_hidden) ~ transfomer: (batch_size *trg_len, num_hidden). 
 
         :return: Logits. Shape(batch_size * trg_seq_len, self.vocab_size+src_len).
@@ -302,7 +395,7 @@ class PointerOutputLayer(OutputLayer):
         logits_trg = super().__call__(hidden, weight=weight, bias=bias)
 
         # decoder.py RecurrentDecoder._step()
-
+        # (trg_len, hidden_layer_dim)
         switch_hidden = mx.sym.FullyConnected(data=hidden,
                                               num_hidden=self.hidden_layer_dim,
                                               weight=self.weights_decoder,
@@ -451,7 +544,7 @@ def dot_attention(queries: mx.sym.Symbol,
 
     probs = mx.sym.softmax(logits, axis=-1) # (n, lq, lk)
     probs = mx.sym.Dropout(probs, p=dropout) if dropout > 0.0 else probs
-
+    
     # (n, lq, lk) x (n, lk, dv) -> (n, lq, dv)
     return mx.sym.batch_dot(lhs=probs, rhs=values, name='%scontexts' % prefix), probs
 

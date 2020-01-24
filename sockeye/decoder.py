@@ -117,7 +117,8 @@ class Decoder(ABC):
                     step: int,
                     target_embed_prev: mx.sym.Symbol,
                     source_encoded_max_length: int,
-                    *states: mx.sym.Symbol) -> Tuple[mx.sym.Symbol, mx.sym.Symbol, mx.sym.Symbol, List[mx.sym.Symbol]]:
+                    *states: mx.sym.Symbol,
+                    beam_size: Optional[int]) -> Tuple[mx.sym.Symbol, mx.sym.Symbol, mx.sym.Symbol, List[mx.sym.Symbol]]:
         """
         Decodes a single time step given the current step, the previous embedded target word,
         and previous decoder states.
@@ -286,7 +287,8 @@ class TransformerDecoder(Decoder):
                     step: int,
                     target_embed_prev: mx.sym.Symbol,
                     source_encoded_max_length: int,
-                    *states: mx.sym.Symbol) -> Tuple[mx.sym.Symbol, mx.sym.Symbol, mx.sym.Symbol, List[mx.sym.Symbol]]:
+                    *states: mx.sym.Symbol,
+                    beam_size: Optional[int]) -> Tuple[mx.sym.Symbol, mx.sym.Symbol, mx.sym.Symbol, List[mx.sym.Symbol]]:
         """
         Decodes a single time step given the current step, the previous embedded target word,
         and previous decoder states.
@@ -343,13 +345,14 @@ class TransformerDecoder(Decoder):
         # TODO(fhieber): no attention probs or context for now
         #attention_context = None
         #attention_probs = mx.sym.sum(mx.sym.zeros_like(source_encoded), axis=2, keepdims=False)
-        # attention_context shape(beam_size, batch_size, num_hidden) -> make it like rnn's contexts (beam_size * batch_size, num_hidden)
+        # attention_context shape(batch_size, beam_size, num_hidden) -> make it like rnn's contexts (batch_size * beam_size, num_hidden)
         attention_context = mx.sym.reshape(data=attention_context, shape=(-3,-1))
-        # attention_probs: shape (batch_size * beam_size * attention_heads, trg_len, src_len) ->
+        # attention_probs: shape (batch_size * attention_heads * beam_size , trg_len, src_len) ->
         # shape as in rnns: (batch_size * beam_size * target_length * attention_heads, src_len)
-        attention_probs = mx.sym.reshape(data=attention_probs, shape=(-4, -1, self.config.attention_heads, -2)) # (batch_size * beam_size, attention_heads, trg_len, src_len)
-        attention_probs = mx.sym.transpose(data=attention_probs, axes=(0, 2, 1, 3)) # (batch_size * beam_size, trg_len, attention_heads, src_len)
-        attention_probs = mx.sym.reshape(data=attention_probs, shape=(-3,-2)) # (batch_size * beam_size *trg_len, attention_heads, src_len)
+        attention_probs = mx.sym.reshape(data=attention_probs, shape=(-4, -1, beam_size, -2)) # (batch_size * attention_heads, beam_size , trg_len, src_len) 
+        attention_probs = mx.sym.reshape(data=attention_probs, shape=(-4, -1, self.config.attention_heads, -2)) # (batch_size, attention_heads, beam_size, trg_len, src_len)
+        attention_probs = mx.sym.transpose(data=attention_probs, axes=(0, 2, 3, 1 ,4)) # (batch_size, beam_size,  trg_len, attention_heads, src_len)
+        attention_probs = mx.sym.reshape(data=attention_probs, shape=(-3, -3, -2)) # (batch_size * beam_size , trg_len* attention_heads, src_len)
         attention_probs = mx.sym.reshape(data=attention_probs, shape=(-3,-2)) # (batch_size * beam_size *trg_len * attention_heads, src_len)
         return target, attention_context, attention_probs, new_states
 
@@ -641,7 +644,8 @@ class RecurrentDecoder(Decoder):
                     step: int,
                     target_embed_prev: mx.sym.Symbol,
                     source_encoded_max_length: int,
-                    *states: mx.sym.Symbol) -> Tuple[mx.sym.Symbol, mx.sym.Symbol, mx.sym.Symbol, List[mx.sym.Symbol]]:
+                    *states: mx.sym.Symbol,
+                    beam_size: Optional[int]) -> Tuple[mx.sym.Symbol, mx.sym.Symbol, mx.sym.Symbol, List[mx.sym.Symbol]]:
         """
         Decodes a single time step given the current step, the previous embedded target word,
         and previous decoder states.
@@ -1120,7 +1124,8 @@ class ConvolutionalDecoder(Decoder):
                     step: int,
                     target_embed_prev: mx.sym.Symbol,
                     source_encoded_max_length: int,
-                    *states: mx.sym.Symbol) -> Tuple[mx.sym.Symbol, mx.sym.Symbol, mx.sym.Symbol, List[mx.sym.Symbol]]:
+                    *states: mx.sym.Symbol,
+                    beam_size: Optional[int]) -> Tuple[mx.sym.Symbol, mx.sym.Symbol, mx.sym.Symbol, List[mx.sym.Symbol]]:
         """
         Decodes a single time step given the current step, the previous embedded target word,
         and previous decoder states.

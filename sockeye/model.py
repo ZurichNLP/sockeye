@@ -63,7 +63,9 @@ class ModelConfig(Config):
                  weight_tying_type: Optional[str] = C.WEIGHT_TYING_TRG_SOFTMAX,
                  weight_normalization: bool = False,
                  use_pointer_nets: bool = False,
+                 pointer_num_hidden: Optional[int] = 128,
                  pointer_net_type: Optional[str] = None,
+                 simple_pointer: Optional[bool] = False,
                  lhuc: bool = False) -> None:
         super().__init__()
         self.config_data = config_data
@@ -80,6 +82,8 @@ class ModelConfig(Config):
         if weight_tying and weight_tying_type is None:
             raise RuntimeError("weight_tying_type must be specified when using weight_tying.")
         self.use_pointer_nets = use_pointer_nets
+        self.pointer_num_hidden = pointer_num_hidden
+        self.simple_pointer = simple_pointer
         self.pointer_net_type = pointer_net_type
         self.lhuc = lhuc
 
@@ -128,13 +132,25 @@ class SockeyeModel:
         # output layer
         if self.config.use_pointer_nets:
             assert self.config.config_loss.name == C.POINTER_NET_CROSS_ENTROPY
-            self.output_layer = layers.PointerOutputLayer(hidden_size=self.decoder.get_num_hidden(),
+            if self.config.simple_pointer:
+                self.output_layer = layers.SimplePointerOutputLayer(hidden_size=self.decoder.get_num_hidden(),
                                                           encoder_hidden_size=self.encoder.get_num_hidden(),
                                                           target_embed_size=self.config.config_embed_target.num_embed,
                                                           vocab_size=self.config.vocab_target_size,
                                                           weight=out_weight_target,
                                                           weight_normalization=self.config.weight_normalization,
                                                           prefix=self.prefix + C.DEFAULT_OUTPUT_LAYER_PREFIX,
+                                                          pointer_num_hidden=self.config.pointer_num_hidden,
+                                                          pointer_type=self.config.pointer_net_type)
+            else:
+                self.output_layer = layers.PointerOutputLayer(hidden_size=self.decoder.get_num_hidden(),
+                                                          encoder_hidden_size=self.encoder.get_num_hidden(),
+                                                          target_embed_size=self.config.config_embed_target.num_embed,
+                                                          vocab_size=self.config.vocab_target_size,
+                                                          weight=out_weight_target,
+                                                          weight_normalization=self.config.weight_normalization,
+                                                          prefix=self.prefix + C.DEFAULT_OUTPUT_LAYER_PREFIX,
+                                                          pointer_num_hidden=self.config.pointer_num_hidden,
                                                           pointer_type=self.config.pointer_net_type)
 
         else:

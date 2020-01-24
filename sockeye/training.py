@@ -174,8 +174,9 @@ class TrainingModel(model.SockeyeModel):
                     if self.config.pointer_net_type == C.POINTER_NET_TRANSFORMER:
                         num_attention_heads=self.config.config_decoder.attention_heads
                     softmax_probs = self.output_layer(target_decoded, attention=attention, context=context, target_embed=target_embed, num_attention_heads=num_attention_heads)
-
+                    
                 loss_output = self.model_loss.get_loss(softmax_probs, labels)
+                
 
             return mx.sym.Group(loss_output), data_names, label_names
 
