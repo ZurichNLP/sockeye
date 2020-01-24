@@ -245,8 +245,7 @@ class SimplePointerOutputLayer(OutputLayer):
                  weight_normalization: bool,
                  prefix: str = C.POINTER_NET_OUTPUT_LAYER_PREFIX,
                  pointer_num_hidden: Optional[int] = 128,
-                 pointer_type: Optional[str] = C.POINTER_NET_RNN,
-                 inference: Optional[bool] = False) -> None:
+                 pointer_type: Optional[str] = C.POINTER_NET_RNN) -> None:
 
         super().__init__(hidden_size, vocab_size, weight, weight_normalization, prefix)
 
@@ -264,7 +263,6 @@ class SimplePointerOutputLayer(OutputLayer):
         self.bias_output = mx.sym.Variable("%spointer_bias_output" % self.prefix, init=mx.init.Zero())
         
         self.pointer_type = pointer_type
-        self.inference = inference
 
     def __call__(self,
                  hidden: Union[mx.sym.Symbol, mx.nd.NDArray],
@@ -308,12 +306,11 @@ class SimplePointerOutputLayer(OutputLayer):
         switch_target_prob = mx.sym.Activation(switch_output, act_type='sigmoid', name=self.prefix+'_out') # shape (batch_size * trg_seq_len,)
 
         probs_src = attention # (batch_size * trg_seq_len, src_len)
-        # transformer: take average of attention heads, shape (batch_size * attention_heads, target_length, source_length) // inference: shape (batch_size * beam_size * attention_heads, target_length, source_length)
+        # transformer: take average of attention heads, shape (batch_size * attention_heads, target_length, source_length) // inference: shape (batch_size * beam_size * attention_heads, source_length)
         # TODO: take average of attention heads? 
         if self.pointer_type == C.POINTER_NET_TRANSFORMER:
-            if not self.inference:
-                probs_src = probs_src.reshape(shape=(-4, -1, num_attention_heads, -2)) # (batch_size * trg_seq_len, attention_heads, source_length)
-            probs_src = mx.sym.mean(probs_src, axis=1) # (batch_size (* beam_size) * trg_seq_len, source_length)
+            probs_src = probs_src.reshape(shape=(-4, -1, num_attention_heads, -2)) # (batch_size * trg_seq_len, attention_heads, source_length) / inference: (batch_size * beam_size, attention_heads, source_length)
+            probs_src = mx.sym.mean(probs_src, axis=1) # (batch_size * trg_seq_len, source_length) / inference: (batch_size * beam_size, source_length)
             #probs_src = mx.sym.Custom(op_type="PrintValue", data=probs_src, print_name="probs_src")
         probs_trg = mx.sym.softmax(data=logits_trg, axis=1) # (batch_size * trg_seq_len, trg_vocab_size)
 
@@ -343,8 +340,7 @@ class PointerOutputLayer(OutputLayer):
                  weight_normalization: bool,
                  prefix: str = C.POINTER_NET_OUTPUT_LAYER_PREFIX,
                  pointer_num_hidden: Optional[int] = 128,
-                 pointer_type: Optional[str] = C.POINTER_NET_RNN,
-                 inference: Optional[bool] = False) -> None:
+                 pointer_type: Optional[str] = C.POINTER_NET_RNN) -> None:
 
         super().__init__(hidden_size, vocab_size, weight, weight_normalization, prefix)
 
@@ -372,7 +368,6 @@ class PointerOutputLayer(OutputLayer):
         self.bias_output = mx.sym.Variable("%spointer_bias_output" % self.prefix, init=mx.init.Zero())
         
         self.pointer_type = pointer_type
-        self.inference = inference
 
     def __call__(self,
                  hidden: Union[mx.sym.Symbol, mx.nd.NDArray],
@@ -430,12 +425,11 @@ class PointerOutputLayer(OutputLayer):
         switch_target_prob = mx.sym.Activation(switch_output, act_type='sigmoid', name=self.prefix+'_out') # shape (batch_size * trg_seq_len,)
 
         probs_src = attention # (batch_size * trg_seq_len, src_len)
-        # transformer: take average of attention heads, shape (batch_size * attention_heads, target_length, source_length) // inference: shape (batch_size * beam_size * attention_heads, target_length, source_length)
+        # transformer: take average of attention heads, shape (batch_size * attention_heads, target_length, source_length) // inference: shape (batch_size * beam_size , attention_heads, source_length)
         # TODO: take average of attention heads? 
         if self.pointer_type == C.POINTER_NET_TRANSFORMER:
-            if not self.inference:
-                probs_src = probs_src.reshape(shape=(-4, -1, num_attention_heads, -2)) # (batch_size * trg_seq_len, attention_heads, source_length)
-            probs_src = mx.sym.mean(probs_src, axis=1) # (batch_size (* beam_size) * trg_seq_len, source_length)
+            probs_src = probs_src.reshape(shape=(-4, -1, num_attention_heads, -2)) # (batch_size * trg_seq_len, attention_heads, source_length) / inference: (batch_size * beam_size, attention_heads, source_length)
+            probs_src = mx.sym.mean(probs_src, axis=1) # (batch_size * trg_seq_len, source_length) / inference: (batch_size * beam_size, source_length)
             #probs_src = mx.sym.Custom(op_type="PrintValue", data=probs_src, print_name="probs_src")
         probs_trg = mx.sym.softmax(data=logits_trg, axis=1) # (batch_size * trg_seq_len, trg_vocab_size)
 
