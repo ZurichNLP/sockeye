@@ -623,8 +623,7 @@ class MonotoneAttentionModel(TrainingModel):
             
             loss_attention = [self.attention_monotonicity_loss.get_loss(attention_scores_list=attention_scores_list,
                                                                         num_attention_heads=self.config.config_decoder.attention_heads,
-                                                                        target_words=target_words,
-                                                                        default_bucket_key=default_bucket_key, 
+                                                                        target_words=target_words, 
                                                                         layers=self._monotone_attention_loss_layers,
                                                                         grad_scale=self._monotone_attention_loss_lambda)] #TODO needs --no-bucketing
            

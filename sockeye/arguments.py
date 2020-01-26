@@ -1176,7 +1176,7 @@ def add_attention_loss(params):
     params = params.add_argument_group("Monotone attention loss parameters")
     params.add_argument('--attention-monotonicity-loss',
                               action='store_true',
-                              help="Use additional loss to encourage monotone decoder-encoder attention. Cannot use bucketing with this option.")
+                              help="Use additional loss to encourage monotone decoder-encoder attention.")
     params.add_argument('--attention-monotonicity-loss-lambda',
                               type=float,
                               default=0.5,

@@ -103,9 +103,6 @@ def check_arg_compatibility(args: argparse.Namespace):
     if args.attention_based_copying:
         check_condition(args.decoder == C.RNN_NAME,
                         "The attention-based copying mechanism currently supports RNN decoders only.")
-    if args.attention_monotonicity_loss:
-        check_condition(args.no_bucketing == True,
-                        "Cannot use bucketing with attention monotonicity loss (use --no-bucketing)")
 
 
 def check_resume(args: argparse.Namespace, output_folder: str) -> bool:
