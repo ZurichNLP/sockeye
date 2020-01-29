@@ -271,7 +271,8 @@ class SimplePointerOutputLayer(OutputLayer):
                  target_embed: Optional[Union[mx.sym.Symbol, mx.nd.NDArray]] = None,
                  weight: Optional[mx.nd.NDArray] = None,
                  bias: Optional[mx.nd.NDArray] = None,
-                 num_attention_heads: Optional[int] = None):
+                 num_attention_heads: Optional[int] = None,
+                 is_inference: Optional[bool] = False):
         """
         Transformation to vocab size + source sentece size, weighted softmax using pointer nets. Returns probabilities.
 
@@ -306,11 +307,13 @@ class SimplePointerOutputLayer(OutputLayer):
         switch_target_prob = mx.sym.Activation(switch_output, act_type='sigmoid', name=self.prefix+'_out') # shape (batch_size * trg_seq_len,)
 
         probs_src = attention # (batch_size * trg_seq_len, src_len)
-        # transformer: take average of attention heads, shape (batch_size * attention_heads, target_length, source_length) // inference: shape (batch_size * beam_size * attention_heads, source_length)
+        # transformer: take average of attention heads, shape (batch_size * attention_heads, target_length, source_length) // inference: shape # (batch_size * beam_size  * attention_heads, src_len)
         # TODO: take average of attention heads? 
         if self.pointer_type == C.POINTER_NET_TRANSFORMER:
-            probs_src = probs_src.reshape(shape=(-4, -1, num_attention_heads, -2)) # (batch_size * trg_seq_len, attention_heads, source_length) / inference: (batch_size * beam_size, attention_heads, source_length)
-            probs_src = mx.sym.mean(probs_src, axis=1) # (batch_size * trg_seq_len, source_length) / inference: (batch_size * beam_size, source_length)
+            probs_src = probs_src.reshape(shape=(-4, -1, num_attention_heads, -2)) # (batch_size , attention_heads, target_length, source_length) / inference: # (batch_size * beam_size, attention_heads, src_len)
+            probs_src = mx.sym.mean(probs_src, axis=1) # (batch_size , trg_seq_len, source_length) / inference: (batch_size * beam_size, source_length)
+            if not is_inference:
+                probs_src = mx.sym.reshape(probs_src, shape=(-3, 0)) # (batch_size * trg_seq_len, source_length)
             #probs_src = mx.sym.Custom(op_type="PrintValue", data=probs_src, print_name="probs_src")
         probs_trg = mx.sym.softmax(data=logits_trg, axis=1) # (batch_size * trg_seq_len, trg_vocab_size)
 
@@ -318,7 +321,7 @@ class SimplePointerOutputLayer(OutputLayer):
         weighted_probs_src = mx.sym.broadcast_mul(probs_src, 1.0 - switch_target_prob, name="simple_pointer_mul2") # (batch_size * trg_seq_len, src_len)
 
         result = mx.sym.concat(weighted_probs_trg, weighted_probs_src, dim=1, name=C.SOFTMAX_OUTPUT_NAME) # (batch_size * trg_seq_len, self.vocab_size+src_len)
-        return result 
+        return result
 
 class PointerOutputLayer(OutputLayer):
     """
@@ -376,12 +379,13 @@ class PointerOutputLayer(OutputLayer):
                  target_embed: Optional[Union[mx.sym.Symbol, mx.nd.NDArray]] = None,
                  weight: Optional[mx.nd.NDArray] = None,
                  bias: Optional[mx.nd.NDArray] = None,
-                 num_attention_heads: Optional[int] = None):
+                 num_attention_heads: Optional[int] = None,
+                 is_inference: Optional[bool] = False):
         """
         Transformation to vocab size + source sentece size, weighted softmax using pointer nets. Returns probabilities.
 
         :param hidden: Decoder representation for n elements. Shape: (batch_size, trg_max_length, rnn_num_hidden ).
-        :param attention: Attention distributions over. Shape: (batch_size * trg_max_length, src_len), transformer shape (batch_size (*beam_size) * trg_len  * num_attention_heads, src_len)
+        :param attention: Attention distributions over. Shape: (batch_size * trg_max_length, src_len), transformer shape (batch_size (*beam_size)  * num_attention_heads *trg_len, src_len)
         :param context: Context on the source sentence. Shape: (batch_size * src_len, encoder_num_hidden) ~ transfomer: (batch_size *trg_len, num_hidden). 
 
         :return: Logits. Shape(batch_size * trg_seq_len, self.vocab_size+src_len).
@@ -425,11 +429,13 @@ class PointerOutputLayer(OutputLayer):
         switch_target_prob = mx.sym.Activation(switch_output, act_type='sigmoid', name=self.prefix+'_out') # shape (batch_size * trg_seq_len,)
 
         probs_src = attention # (batch_size * trg_seq_len, src_len)
-        # transformer: take average of attention heads, shape (batch_size * attention_heads, target_length, source_length) // inference: shape (batch_size * beam_size , attention_heads, source_length)
+        # transformer: take average of attention heads, shape (batch_size * attention_heads, target_length, source_length) // inference: shape # (batch_size * beam_size  * attention_heads, src_len)
         # TODO: take average of attention heads? 
         if self.pointer_type == C.POINTER_NET_TRANSFORMER:
-            probs_src = probs_src.reshape(shape=(-4, -1, num_attention_heads, -2)) # (batch_size * trg_seq_len, attention_heads, source_length) / inference: (batch_size * beam_size, attention_heads, source_length)
-            probs_src = mx.sym.mean(probs_src, axis=1) # (batch_size * trg_seq_len, source_length) / inference: (batch_size * beam_size, source_length)
+            probs_src = probs_src.reshape(shape=(-4, -1, num_attention_heads, -2)) # (batch_size , attention_heads, target_length, source_length) / inference: # (batch_size * beam_size, attention_heads, src_len)
+            probs_src = mx.sym.mean(probs_src, axis=1) # (batch_size , trg_seq_len, source_length) / inference: (batch_size * beam_size, source_length)
+            if not is_inference:
+                probs_src = mx.sym.reshape(probs_src, shape=(-3, 0)) # (batch_size * trg_seq_len, source_length)
             #probs_src = mx.sym.Custom(op_type="PrintValue", data=probs_src, print_name="probs_src")
         probs_trg = mx.sym.softmax(data=logits_trg, axis=1) # (batch_size * trg_seq_len, trg_vocab_size)
 
