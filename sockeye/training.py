@@ -166,8 +166,10 @@ class TrainingModel(model.SockeyeModel):
                     context, attention = target_decoded_and_attention[1:]
 
                     # context: (batch_size * trg_seq_len, encoder_num_hidden), attention: (batch_size * trg_seq_len, source_length)
+                    # transformer: (batch_size * trg_seq_len, model_size), attention: (batch_size *num_attention_heads, trg_seq_len ,source_length)
                     context = mx.sym.reshape(data=context, shape=(-3, 0))
-                    attention = mx.sym.reshape(data=attention, shape=(-3, 0))
+                    if self.config.pointer_net_type == C.POINTER_NET_RNN:
+                        attention = mx.sym.reshape(data=attention, shape=(-3, 0))
 
                     # softmax_probs: (batch_size * target_seq_len, target_vocab_size+src_seq_len)
                     num_attention_heads=None

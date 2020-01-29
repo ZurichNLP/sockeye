@@ -269,16 +269,14 @@ class TransformerDecoder(Decoder):
         if self.config.dropout_prepost > 0.0:
             target = mx.sym.Dropout(data=target, p=self.config.dropout_prepost)
         
-        # TODO: context + attention scores of only last layer or all?
-        #attention_scores_list = [] # length: layers, attention_scores shape: (batch_size * attention_heads, source_length, depth)
-        #contexts = [] # length: layers, attention_scores shape: (batch_size * attention_heads, source_length, depth)
+        # attention_scores shape: (batch_size * attention_heads, target_length, source_length)
+        # context shape: (batch_size * attention_heads, target_length, depth)
         for layer in self.layers:
             target, attention_scores, context = layer(target=target,
                            target_bias=target_bias,
                            source=source_encoded,
                            source_bias=source_bias)
-            #attention_scores_list.append(attention_scores)
-            #contexts.append(context)
+            
         target = self.final_process(data=target, prev=None)
 
         return target, context, attention_scores
@@ -348,7 +346,7 @@ class TransformerDecoder(Decoder):
         # attention_context shape(batch_size, beam_size, num_hidden) -> make it like rnn's contexts (batch_size * beam_size, num_hidden)
         attention_context = mx.sym.reshape(data=attention_context, shape=(-3,-1))
         # attention_probs: shape (batch_size * attention_heads * beam_size , 1, src_len) ->
-        # shape as in rnns: (batch_size * beam_size  * attention_heads, src_len)
+        # shape as from decode_sequence: (batch_size  * attention_heads (* beam_size), trg_len=1, src_len)
         attention_probs = mx.sym.reshape(data=attention_probs, shape=(-4, -1, beam_size, -2)) # (batch_size * attention_heads, beam_size , 1, src_len) 
         attention_probs = mx.sym.reshape(data=attention_probs, shape=(-4, -1, self.config.attention_heads, -2)) # (batch_size, attention_heads, beam_size, 1, src_len)
         attention_probs = mx.sym.transpose(data=attention_probs, axes=(0, 2, 3, 1 ,4)) # (batch_size, beam_size,  1, attention_heads, src_len)
