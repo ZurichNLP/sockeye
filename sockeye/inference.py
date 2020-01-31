@@ -229,6 +229,7 @@ class InferenceModel(model.SockeyeModel):
                                                 source_encoded_seq_len,
                                                 *states, 
                                                 beam_size=self.beam_size)
+            
             if self.decoder_return_logit_inputs:
                 # skip output layer in graph
                 outputs = mx.sym.identity(target_decoded, name=C.LOGIT_INPUTS_NAME)
@@ -245,7 +246,7 @@ class InferenceModel(model.SockeyeModel):
                     if self.config.pointer_net_type == C.POINTER_NET_TRANSFORMER:
                         num_attention_heads=self.config.config_decoder.attention_heads
                     outputs = self.output_layer(target_decoded, attention=attention_probs,
-                                                context=attention_context, target_embed=target_embed_prev, num_attention_heads=num_attention_heads)
+                                                context=attention_context, target_embed=target_embed_prev, num_attention_heads=num_attention_heads, is_inference=True)
 
             data_names = [C.TARGET_NAME] + state_names
             label_names = []  # type: List[str]
@@ -325,7 +326,6 @@ class InferenceModel(model.SockeyeModel):
             provide_data=self._get_decoder_data_shapes(bucket_key))
         self.decoder_module.forward(data_batch=batch, is_train=False)
         out, attention_probs, *model_state.states = self.decoder_module.get_outputs()
-    
         return out, attention_probs, model_state
 
     @property
@@ -986,7 +986,10 @@ class Translator:
                  strip_unknown_words: bool = False,
                  mark_pointed_words: Optional[bool] = False,
                  min_length: Optional[int] = 1, 
-                 copy_unk: Optional[bool] = False) -> None:
+                 copy_unk: Optional[bool] = False,
+                 coverage_penalty: Optional[bool] = False,
+                 coverage_penalty_beta: Optional[float] = 5.0,
+                 stepwise_coverage_penalty: Optional[bool] = False) -> None:
         self.context = context
         self.length_penalty = length_penalty
         self.beam_prune = beam_prune
@@ -1007,6 +1010,9 @@ class Translator:
         self.mark_pointed_words = mark_pointed_words
         self.min_length = min_length
         self.copy_unk = copy_unk
+        self.coverage_penalty = coverage_penalty
+        self.coverage_penalty_beta = coverage_penalty_beta
+        self.stepwise_coverage_penalty = stepwise_coverage_penalty
         self.models = models
         utils.check_condition(all(self.source_with_eos == m.source_with_eos for m in models),
                               "The source_with_eos property must match across models.")
@@ -1416,6 +1422,20 @@ class Translator:
         else:
             neg_logprobs = self.interpolation_func(probs)
         return neg_logprobs, attention_prob_score
+    
+    def _get_coverage_penalty(self, 
+                              coverage: mx.nd.NDArray, 
+                              beta: Optional[float] = 5.0):
+        """OpenNMT-py summary penalty.
+        param coverage: Accumulated attention scores, shape(batch * beam, src_len)
+        param beta: Float to scale the penalty.
+        """
+        ones = mx.nd.ones_like(coverage)
+        penalty = mx.nd.maximum(lhs=coverage, rhs=ones)
+        penalty = mx.nd.sum(penalty, axis=-1)
+        
+        penalty -= coverage.shape[-1]
+        return (beta * penalty).expand_dims(axis=1)
 
     def _beam_search(self,
                      source: mx.nd.NDArray,
@@ -1557,19 +1577,31 @@ class Translator:
         for t in range(1, max_output_length):
             # (1) obtain next predictions and advance models' state
             # scores: (batch_size * beam_size, target_vocab_size)
-            # attention_scores: (batch_size * beam_size, bucket_key)
+            # attention_scores: (batch_size * beam_size, bucket_key), transformer: (batch_size * beam_size * attention_heads, src_len)
             scores, attention_scores, model_states = self._decode_step(prev_word=best_word_indices,
                                                                        step=t,
                                                                        source_length=source_length,
                                                                        states=model_states,
                                                                        models_output_layer_w=models_output_layer_w,
                                                                        models_output_layer_b=models_output_layer_b)
-
+            
             # print('TIMESTEP', t, 'MAX INPUT', 'THIS INPUT', source_len, self.max_input_length, 'VOCAB', len(self.vocab_target), 'SCORES', scores.shape, 'PAD', pad_dist.shape, 'finished', finished.shape, 'inactive', inactive.shape, 'accum', scores_accumulated.shape, 'inf', self.inf_array.shape)
-
+            
+            # take average of attention heads. TODO: better keep track of coverage over individual attention heads?
+            if self.models[0].config.pointer_net_type == C.POINTER_NET_TRANSFORMER:
+                avg_attention_scores = attention_scores.reshape(shape=(-4, self.batch_size * self.beam_size, -1, 0))
+                avg_attention_scores = avg_attention_scores.mean(axis=1)
+            
+            if self.coverage_penalty and self.stepwise_coverage_penalty and (hasattr(self, "_prev_penalty") and self._prev_penalty is not None):
+                # update scores_accumulated before they're added to scores in _update_scores
+                # take away penalty from previous step
+                scores_accumulated -= self._prev_penalty
+                # add new penalty
+                current_coverage_penalty = self._get_coverage_penalty(avg_attention_scores + self._coverage, self.coverage_penalty_beta)
+                scores_accumulated += current_coverage_penalty
+                
             # (2) Update scores. Special treatment for finished and inactive rows. Inactive rows are inf everywhere;
             # finished rows are inf everywhere except column zero, which holds the accumulated model score
-
             scores = self._update_scores.forward(scores, finished, inactive, scores_accumulated, self.inf_array, pad_dist)
 
             # Mark entries that should be blocked as having a score of np.inf
@@ -1586,6 +1618,8 @@ class Translator:
             # (3) Get beam_size winning hypotheses for each sentence block separately. Only look as
             # far as the active beam size for each sentence.
             best_hyp_indices, best_word_indices, scores_accumulated = self._topk(scores)
+            
+            
 
             # Constraints for constrained decoding are processed sentence by sentence
             if any(raw_constraint_list):
@@ -1604,6 +1638,30 @@ class Translator:
                 # All rows are now active (after special treatment of start state at t=1)
                 inactive[:] = 0
 
+            # collect coverage penalty -> OpenNMT-py onmt/translate/beam_search.py
+            if self.coverage_penalty:
+                # attention_scores (batch_size * beam_size * attention_heads, src_len)
+                # scores (batch *beam, target_vocab(+src_len)), scores_accumulated: (batch *beam, 1)
+                # best_hyp_indices (batch*beam)
+                
+                
+                #avg_attention_scores = attention_scores.reshape(shape=(-4, self.batch_size * self.beam_size, -1, 0))
+                #avg_attention_scores = avg_attention_scores.mean(axis=1) # (batch*beam, src_len)
+                
+                current_attention = avg_attention_scores.take(axis=0, indices=best_hyp_indices)
+                if t==1:
+                    self._coverage = current_attention # shape (batch *beam *heads)
+                    self._prev_penalty = mx.nd.zeros(shape=(self.batch_size * self.beam_size, 1), ctx=self.context) 
+                else:
+                    self._coverage = self._coverage.take(axis=0, indices=best_hyp_indices)
+                    self._coverage += current_attention
+                    self._prev_penalty = self._get_coverage_penalty(self._coverage, self.coverage_penalty_beta)
+                    
+            if self.coverage_penalty and not self.stepwise_coverage_penalty:
+                # TODO: apply penalty as avg of penalty per head?
+                cov_pen = self._get_coverage_penalty(self._coverage, self.coverage_penalty_beta)
+                scores_accumulated += cov_pen
+                
             # Map from restricted to full vocab ids if needed
             if self.restrict_lexicon:
                 best_word_indices = vocab_slice_ids.take(best_word_indices)
@@ -1643,6 +1701,9 @@ class Translator:
                 #scores_accumulated = scores_accumulated * mask_unkown_scores_inv
                 #scores_accumulated += src_scores_accumulated_to_replace
                 
+
+               
+           
             # (4) Reorder fixed-size beam data according to best_hyp_indices (ascending)
             finished, lengths, attention_scores = self._sort_by_index.forward(best_hyp_indices,
                                                                               finished,

@@ -1239,6 +1239,18 @@ def add_inference_args(params):
                                default=False,
                                action='store_true',
                                help='Replace unknown words in the output with the source word with the highest probability (only possible for models with pointer networks) . Default: %(default)s')
+    decode_params.add_argument('--coverage-penalty',
+                               default=False,
+                               action='store_true',
+                               help='Use coverage penalty while translating (try to avoid repetitions). Default: %(default)s')
+    decode_params.add_argument('--coverage-penalty-beta',
+                               default=5.0,
+                               type=float,
+                               help='Beta parameter in coverage penalty (used to weigh penalty). Default: %(default)s')
+    decode_params.add_argument('--stepwise-coverage-penalty',
+                               default=False,
+                               action='store_true',
+                               help='Apply coverage penalty at every decoding step while translating. Default: %(default)s')
 
 
 

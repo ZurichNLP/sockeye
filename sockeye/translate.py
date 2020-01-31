@@ -105,7 +105,10 @@ def run_translate(args: argparse.Namespace):
                                           strip_unknown_words=args.strip_unknown_words,
                                           mark_pointed_words=args.mark_pointed_words,
                                           min_length=args.minimum_length,
-                                          copy_unk=args.copy_unknown)
+                                          copy_unk=args.copy_unknown,
+                                          coverage_penalty=args.coverage_penalty,
+                                          coverage_penalty_beta=args.coverage_penalty_beta,
+                                          stepwise_coverage_penalty=args.stepwise_coverage_penalty)
         read_and_translate(translator=translator,
                            output_handler=output_handler,
                            chunk_size=args.chunk_size,
