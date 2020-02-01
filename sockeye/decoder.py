@@ -274,10 +274,11 @@ class TransformerDecoder(Decoder):
             target = mx.sym.Dropout(data=target, p=self.config.dropout_prepost)
 
         for layer in self.layers:
-            target = layer(target, target_bias, source_encoded, source_bias)
+            target, attention_probs, attention_scores = layer(target, target_bias, source_encoded, source_bias)
         target = self.final_process(target, None)
 
-        return target, None
+        # attention: (batch_size * attention_heads, target_length, source_length)
+        return target, attention_scores
 
     def decode_step(self,
                     step: int,
@@ -320,7 +321,7 @@ class TransformerDecoder(Decoder):
         new_states = [source_encoded, source_encoded_lengths]
         layer_caches = self._get_cache_per_layer(cast(List[mx.sym.Symbol], cache))
         for layer, layer_cache in zip(self.layers, layer_caches):
-            target = layer(target, target_bias, source_encoded, source_bias, layer_cache)
+            target, attention_probs, attention_scores = layer(target, target_bias, source_encoded, source_bias, layer_cache)
             # store updated keys and values in states list.
             # (layer.__call__() has the side-effect of updating contents of layer_cache)
             new_states += [layer_cache['k'], layer_cache['v']]
@@ -331,9 +332,15 @@ class TransformerDecoder(Decoder):
         target = mx.sym.reshape(target, shape=(-3, -1))
 
         # TODO(fhieber): no attention probs for now
-        attention_probs = mx.sym.sum(mx.sym.zeros_like(source_encoded), axis=2, keepdims=False)
-
-        return target, attention_probs, new_states, None
+        #attention_probs = mx.sym.sum(mx.sym.zeros_like(source_encoded), axis=2, keepdims=False)
+        # attention_probs: shape (batch_size *  * beam_size * attention_heads , 1, src_len)
+        # attention_scores: shape (batch_size *  * beam_size * attention_heads, 1, src_len)
+        # shape same as rnn attention, take average of heads: (batch_size  * beam_size, trg_len=1, src_len)
+        attention_probs = mx.sym.reshape(data=attention_probs, shape=(-4, -1, self.config.attention_heads, -2)) # (batch_size *beam_size, attention_heads, 1, src_len)
+        attention_probs = mx.sym.mean(attention_probs, axis=1).squeeze() # (batch_size * beam_size, src_len)
+        attention_scores = mx.sym.reshape(data=attention_scores, shape=(-4, -1, self.config.attention_heads, -2)) # (batch_size *beam_size, attention_heads, 1, src_len)
+        attention_scores = mx.sym.mean(attention_scores, axis=1).squeeze() # (batch_size * beam_size, src_len)
+        return target, attention_probs, new_states, attention_scores
 
     def _get_cache_per_layer(self, cache: List[mx.sym.Symbol]) -> List[Dict[str, Optional[mx.sym.Symbol]]]:
         """
@@ -666,7 +673,6 @@ class RecurrentDecoder(Decoder):
                       attention_state.dynamic_source,
                       source_encoded_length,
                       state.hidden] + state.layer_states
-
         return state.hidden, attention_state.probs, new_states, attention_state.scores
 
     def reset(self):

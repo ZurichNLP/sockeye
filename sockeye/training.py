@@ -160,6 +160,11 @@ class TrainingModel(model.SockeyeModel):
             logits = self.output_layer(target_decoded)
             
             if self.config.num_pointers:
+                if hasattr(self.config.config_decoder, "attention_heads"):
+                    num_heads = self.config.config_decoder.attention_heads
+                    # transformer attention: (batch * heads, trg_len, src_len) -> take average of heads
+                    pointer_scores = pointer_scores.reshape(shape=(-4, -1, num_heads, -2))
+                    pointer_scores = mx.sym.mean(pointer_scores, axis=1)
                 # pointer_scores: (batch-size * target_seq_len, source_seq_len)
                 pointer_scores = mx.sym.reshape(data=pointer_scores, shape=(-3, 0))
                 

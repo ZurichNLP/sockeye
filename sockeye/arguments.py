@@ -1387,6 +1387,31 @@ def add_inference_args(params):
                                default=0.9,
                                type=float,
                                help='Threshold to consider a soft alignment a sure alignment. Default: %(default)s.')
+    
+    decode_params.add_argument('--mark-pointed-words',
+                               default=False,
+                               action='store_true',
+                               help='Annotate pointed words in the output')
+    decode_params.add_argument('--minimum-length',
+                               default=1,
+                               type=int,
+                               help='Minimum length of translation. Default: %(default)s')
+    decode_params.add_argument('--copy-unknown',
+                               default=False,
+                               action='store_true',
+                               help='Replace unknown words in the output with the source word with the highest probability (only possible for models with pointer networks) . Default: %(default)s')
+    decode_params.add_argument('--coverage-penalty',
+                               default=False,
+                               action='store_true',
+                               help='Use coverage penalty while translating (try to avoid repetitions). Default: %(default)s')
+    decode_params.add_argument('--coverage-penalty-beta',
+                               default=5.0,
+                               type=float,
+                               help='Beta parameter in coverage penalty (used to weigh penalty). Default: %(default)s')
+    decode_params.add_argument('--stepwise-coverage-penalty',
+                               default=False,
+                               action='store_true',
+                               help='Apply coverage penalty at every decoding step while translating. Default: %(default)s')
 
     # common params with score CLI
     add_length_penalty_args(decode_params)

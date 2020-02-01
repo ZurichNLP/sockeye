@@ -409,12 +409,13 @@ class DotAttentionCell(mx.gluon.HybridBlock):
 
         if bias is not None:
             logits = F.broadcast_add(logits, bias)
-
+        
         probs = F.softmax(logits, axis=-1)
         probs = F.Dropout(probs, p=self.dropout) if self.dropout > 0.0 else probs
+        
 
         # (n, lq, lk) x (n, lk, dv) -> (n, lq, dv)
-        return F.batch_dot(lhs=probs, rhs=values)
+        return F.batch_dot(lhs=probs, rhs=values), probs, logits
 
 
 class MultiHeadAttentionBase(mx.gluon.HybridBlock):
@@ -470,17 +471,16 @@ class MultiHeadAttentionBase(mx.gluon.HybridBlock):
         keys = split_heads(F, keys, self.depth_per_head, self.heads)
         values = split_heads(F, values, self.depth_per_head, self.heads)
         lengths = broadcast_to_heads(F, lengths, self.heads, ndim=1, fold_heads=True) if lengths is not None else lengths
-
-        # (batch*heads, query_max_length, depth_per_head)
-        contexts = self.dot_att(queries, keys, values, lengths, bias)
-
+        
+        # (batch*heads, query_max_length, depth_per_head), attention_probs + attention_scores (batch * head, trg_len, src_len) 
+        contexts, attention_probs, attention_scores = self.dot_att(queries, keys, values, lengths, bias)
         # (batch, query_max_length, depth)
         contexts = combine_heads(F, contexts, self.depth_per_head, self.heads)
 
         # contexts: (batch, query_max_length, output_depth)
         contexts = self.ff_out(contexts)
 
-        return contexts
+        return contexts, attention_probs, attention_scores
 
 
 class MultiHeadSelfAttention(MultiHeadAttentionBase):
@@ -526,6 +526,8 @@ class MultiHeadSelfAttention(MultiHeadAttentionBase):
         """
         # combined: (batch, max_length, depth * 3)
         combined = self.ff_in(inputs)
+        
+        
         # split into query, keys and values
         # (batch, max_length, depth)
         # pylint: disable=unbalanced-tuple-unpacking
@@ -536,7 +538,8 @@ class MultiHeadSelfAttention(MultiHeadAttentionBase):
             keys = cache['k'] = keys if cache['k'] is None else F.concat(cache['k'], keys, dim=1)
             values = cache['v'] = values if cache['v'] is None else F.concat(cache['v'], values, dim=1)
 
-        return self._attend(F, queries, keys, values, lengths=input_lengths, bias=bias)
+        context, attention_probs, attention_scores = self._attend(F, queries, keys, values, lengths=input_lengths, bias=bias)
+        return context
 
 
 class MultiHeadAttention(MultiHeadAttentionBase):

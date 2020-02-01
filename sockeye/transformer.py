@@ -177,7 +177,7 @@ class TransformerDecoderBlock(mx.gluon.HybridBlock):
         target = self.post_self_attention(target_self_att, target)
 
         # encoder attention
-        target_enc_att = self.enc_attention(self.pre_enc_attention(target, None), source, None, source_bias)
+        target_enc_att, attention_probs, attention_scores = self.enc_attention(self.pre_enc_attention(target, None), source, None, source_bias)
         target = self.post_enc_attention(target_enc_att, target)
 
         # feed-forward
@@ -187,7 +187,7 @@ class TransformerDecoderBlock(mx.gluon.HybridBlock):
         if self.lhuc:
             target = self.lhuc(target)
 
-        return target
+        return target, attention_probs, attention_scores
 
 
 class TransformerProcessBlock(mx.gluon.nn.HybridBlock):
