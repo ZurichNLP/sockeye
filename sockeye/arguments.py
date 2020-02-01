@@ -409,9 +409,10 @@ def add_pointer_args(params):
                         type=int,
                         default=128,
                         help='Hidden layer dimension of pointer networks. %(default)s.')
-    params.add_argument('--simple-pointer',
-                        action='store_true',
-                        help='Use simple pointer network (get probability for target vocab words from target embedding (do not consider decoder hidden states and context vectors)). %(default)s.')
+    params.add_argument('--pointer-nets-layer',
+                        choices=C.POINTER_NET_LAYER_CHOICES,
+                        default=C.POINTER_NET_LAYER_STANDARD,
+                        help="Type of pointer net output layer. Default: %(default)s.")
 
 
 def add_bucketing_args(params):

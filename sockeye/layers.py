@@ -224,6 +224,96 @@ class OutputLayer:
                                     weight=weight,
                                     bias=bias,
                                     flatten=False)
+
+class onmtPointerOutputLayer(OutputLayer):
+    """
+    Defines the output layer of Sockeye decoders. Supports weight tying and weight normalization.
+
+    :param hidden_size: Decoder hidden size.
+    :param encoder_hidden_size: Encoder hidden size.
+    :param vocab_size: Target vocabulary size.
+    :param weight_normalization: Whether to apply weight normalization.
+    :param prefix: Prefix used for naming.
+    """
+
+    def __init__(self,
+                 hidden_size: int,
+                 vocab_size: int,
+                 weight: Optional[mx.sym.Symbol],
+                 weight_normalization: bool,
+                 pointer_num_hidden: Optional[int] = 128,
+                 pointer_type: Optional[str] = C.POINTER_NET_RNN,
+                 prefix: str = C.POINTER_NET_OUTPUT_LAYER_PREFIX) -> None:
+
+        super().__init__(hidden_size, vocab_size, weight, weight_normalization, prefix)
+
+        self.hidden_layer_dim = pointer_num_hidden
+        self.uniform_range = 0.1
+        self.hidden_size = hidden_size
+        
+        self.linear_copy = mx.sym.Variable("%spointer_weight_linear_copy" % self.prefix, init=mx.init.Uniform(self.uniform_range),
+                                              shape=(self.hidden_size, 1))
+        self.linear_copy_bias = mx.sym.Variable("%spointer_linear_copy_bias" % self.prefix, init=mx.init.Zero())
+        
+        self.pointer_type = pointer_type
+
+    def __call__(self,
+                 hidden: Union[mx.sym.Symbol, mx.nd.NDArray],
+                 attention: Optional[Union[mx.sym.Symbol, mx.nd.NDArray]] = None,
+                 context: Optional[Union[mx.sym.Symbol, mx.nd.NDArray]] = None,
+                 target_embed: Optional[Union[mx.sym.Symbol, mx.nd.NDArray]] = None,
+                 weight: Optional[mx.nd.NDArray] = None,
+                 bias: Optional[mx.nd.NDArray] = None,
+                 num_attention_heads: Optional[int] = None,
+                 is_inference: Optional[bool] = False):
+        """
+        Transformation to vocab size + source sentece size, weighted softmax using pointer nets. Returns probabilities.
+
+        :param hidden: Decoder representation for n elements. Shape: (batch_size, trg_max_length, rnn_num_hidden ).
+        :param attention: Attention distributions over. Shape: (batch_size * trg_max_length, src_len), transformer shape (batch_size (*beam_size) * trg_len  * num_attention_heads, src_len)
+      
+        :return: Logits. Shape(batch_size * trg_seq_len, self.vocab_size+src_len).
+        """
+        # logits: (batch_size * trg_seq_len, trg_vocab_size)
+        logits_trg = super().__call__(hidden, weight=weight, bias=bias)
+        probs_trg = mx.sym.softmax(data=logits_trg, axis=1)
+
+          # Probability of copying p(z=1) batch.
+        #p_copy = torch.sigmoid(self.linear_copy(hidden))
+        ## Probability of not copying: p_{word}(w) * (1 - p(z))
+        #out_prob = torch.mul(prob, 1 - p_copy)
+        #mul_attn = torch.mul(attn, p_copy)
+        #copy_prob = torch.bmm(
+            #mul_attn.view(-1, batch, slen).transpose(0, 1),
+            #src_map.transpose(0, 1)
+        #).transpose(0, 1)
+        #copy_prob = copy_prob.contiguous().view(-1, cvocab)
+        #return torch.cat([out_prob, copy_prob], 1)
+
+        p_copy = mx.sym.FullyConnected(data=hidden,
+                                              num_hidden=self.hidden_layer_dim,
+                                              weight=self.linear_copy,
+                                              bias=self.linear_copy_bias,
+                                              flatten=False,
+                                              name=self.prefix + '_linear_copy_transform')
+
+        p_copy = mx.sym.Activation(p_copy, act_type='sigmoid', name=self.prefix + '_linear_copy_switch')
+        
+        ## Probability of not copying: p_{word}(w) * (1 - p(z))
+        weighted_probs_trg = mx.sym.broadcast_mul(lhs=probs_trg, rhs=(1 - p_copy))
+        
+        probs_src = attention
+        if self.pointer_type == C.POINTER_NET_TRANSFORMER:
+            probs_src = probs_src.reshape(shape=(-4, -1, num_attention_heads, -2)) # (batch_size , attention_heads, target_length, source_length) / inference: # (batch_size * beam_size, attention_heads, src_len)
+            probs_src = mx.sym.mean(probs_src, axis=1) # (batch_size , trg_seq_len, source_length) / inference: (batch_size * beam_size, source_length)
+            if not is_inference:
+                probs_src = mx.sym.reshape(probs_src, shape=(-3, 0)) # (batch_size * trg_seq_len, source_length)
+        
+        weighted_probs_src = mx.sym.broadcast_mul(lhs=probs_src, rhs=p_copy)
+        # TODO: src_map?
+
+        result = mx.sym.concat(weighted_probs_trg, weighted_probs_src, dim=1, name=C.SOFTMAX_OUTPUT_NAME) # (batch_size * trg_seq_len, self.vocab_size+src_len)
+        return result
     
 class SimplePointerOutputLayer(OutputLayer):
     """
@@ -238,7 +328,6 @@ class SimplePointerOutputLayer(OutputLayer):
 
     def __init__(self,
                  hidden_size: int,
-                 encoder_hidden_size: int,
                  target_embed_size: int,
                  vocab_size: int,
                  weight: Optional[mx.sym.Symbol],

@@ -660,7 +660,7 @@ def create_model_config(args: argparse.Namespace,
                                      use_pointer_nets=args.use_pointer_nets,
                                      pointer_num_hidden=args.pointer_num_hidden,
                                      pointer_net_type=args.pointer_nets_type,
-                                     simple_pointer=args.simple_pointer,
+                                     pointer_net_layer=args.pointer_nets_layer,
                                      lhuc=args.lhuc is not None)
     return model_config
 

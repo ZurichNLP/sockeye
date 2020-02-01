@@ -605,7 +605,7 @@ class EarlyStoppingTrainer:
             ############
             # CHECKPOINT
             ############
-            if self.state.updates > 0 and self.state.updates % checkpoint_frequency == 0:
+            if self.state.updates > 0 and self.state.batches % (checkpoint_frequency * self.update_interval)== 0:
                 time_cost = time.time() - tic
                 self.state.checkpoint += 1
                 # (1) save parameters and evaluate on validation data

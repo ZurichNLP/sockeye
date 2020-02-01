@@ -227,8 +227,7 @@ class InferenceModel(model.SockeyeModel):
              states) = self.decoder.decode_step(decode_step,
                                                 target_embed_prev,
                                                 source_encoded_seq_len,
-                                                *states, 
-                                                beam_size=self.beam_size)
+                                                *states)
             
             if self.decoder_return_logit_inputs:
                 # skip output layer in graph
@@ -1591,8 +1590,10 @@ class Translator:
             if self.models[0].config.pointer_net_type == C.POINTER_NET_TRANSFORMER:
                 avg_attention_scores = attention_scores.reshape(shape=(-4, self.batch_size * self.beam_size, -1, 0))
                 avg_attention_scores = avg_attention_scores.mean(axis=1)
+            else:
+                avg_attention_scores = attention_scores
             
-            if self.coverage_penalty and self.stepwise_coverage_penalty and (hasattr(self, "_prev_penalty") and self._prev_penalty is not None):
+            if t>1 and self.coverage_penalty and self.stepwise_coverage_penalty and (hasattr(self, "_prev_penalty") and self._prev_penalty is not None):
                 # update scores_accumulated before they're added to scores in _update_scores
                 # take away penalty from previous step
                 scores_accumulated -= self._prev_penalty
@@ -1650,7 +1651,7 @@ class Translator:
                 
                 current_attention = avg_attention_scores.take(axis=0, indices=best_hyp_indices)
                 if t==1:
-                    self._coverage = current_attention # shape (batch *beam *heads)
+                    self._coverage = current_attention # shape (batch *beam, src_len)
                     self._prev_penalty = mx.nd.zeros(shape=(self.batch_size * self.beam_size, 1), ctx=self.context) 
                 else:
                     self._coverage = self._coverage.take(axis=0, indices=best_hyp_indices)
@@ -1687,7 +1688,7 @@ class Translator:
                 for index in best_src_word_to_replace.asnumpy():
                     if not index == 0:
                         index -= target_vocab_size 
-                        logger.info("Replacing <unk> with {}".format(self.vocab_source_inv[index]))
+                        logger.debug("Replacing <unk> with {}".format(self.vocab_source_inv[index]))
                
                 # inverse masks: unk_id set to 0, rest to 1 (needed to set orginal values of unk_id to 0, then add new ids + scores from src
                 mask_unkown_inv = (mask_unkown == 0)

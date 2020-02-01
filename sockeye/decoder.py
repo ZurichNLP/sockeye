@@ -285,8 +285,7 @@ class TransformerDecoder(Decoder):
                     step: int,
                     target_embed_prev: mx.sym.Symbol,
                     source_encoded_max_length: int,
-                    *states: mx.sym.Symbol,
-                    beam_size: Optional[int]) -> Tuple[mx.sym.Symbol, mx.sym.Symbol, mx.sym.Symbol, List[mx.sym.Symbol]]:
+                    *states: mx.sym.Symbol) -> Tuple[mx.sym.Symbol, mx.sym.Symbol, mx.sym.Symbol, List[mx.sym.Symbol]]:
         """
         Decodes a single time step given the current step, the previous embedded target word,
         and previous decoder states.
@@ -345,13 +344,13 @@ class TransformerDecoder(Decoder):
         #attention_probs = mx.sym.sum(mx.sym.zeros_like(source_encoded), axis=2, keepdims=False)
         # attention_context shape(batch_size, beam_size, num_hidden) -> make it like rnn's contexts (batch_size * beam_size, num_hidden)
         attention_context = mx.sym.reshape(data=attention_context, shape=(-3,-1))
-        # attention_probs: shape (batch_size * attention_heads * beam_size , 1, src_len) ->
-        # shape as from decode_sequence: (batch_size  * attention_heads (* beam_size), trg_len=1, src_len)
-        attention_probs = mx.sym.reshape(data=attention_probs, shape=(-4, -1, beam_size, -2)) # (batch_size * attention_heads, beam_size , 1, src_len) 
-        attention_probs = mx.sym.reshape(data=attention_probs, shape=(-4, -1, self.config.attention_heads, -2)) # (batch_size, attention_heads, beam_size, 1, src_len)
-        attention_probs = mx.sym.transpose(data=attention_probs, axes=(0, 2, 3, 1 ,4)) # (batch_size, beam_size,  1, attention_heads, src_len)
-        attention_probs = mx.sym.reshape(data=attention_probs, shape=(-3, -3, -2)) # (batch_size * beam_size ,  attention_heads, src_len)
-        attention_probs = mx.sym.reshape(data=attention_probs, shape=(-3,-2)) # (batch_size * beam_size  * attention_heads, src_len)
+        # attention_probs: shape (batch_size * beam_size * attention_heads , 1, src_len) ->
+        # shape as from decode_sequence: (batch_size   (* beam_size) * attention_heads, trg_len=1, src_len)
+        attention_probs = attention_probs.squeeze() # (batch_size * beam_size, attention_heads, src_len)
+        #attention_probs = mx.sym.reshape(data=attention_probs, shape=(-4, -1, self.config.attention_heads, -2)) # (batch_size, attention_heads, beam_size, 1, src_len)
+        #attention_probs = mx.sym.transpose(data=attention_probs, axes=(0, 2, 3, 1 ,4)) # (batch_size, beam_size,  1, attention_heads, src_len)
+        #attention_probs = mx.sym.reshape(data=attention_probs, shape=(-3, -3, -2)) # (batch_size * beam_size ,  attention_heads, src_len)
+        #attention_probs = mx.sym.reshape(data=attention_probs, shape=(-3,-2)) # (batch_size * beam_size  * attention_heads, src_len)
         return target, attention_context, attention_probs, new_states
 
     def _get_cache_per_layer(self, cache: List[mx.sym.Symbol]) -> List[Dict[str, Optional[mx.sym.Symbol]]]:
