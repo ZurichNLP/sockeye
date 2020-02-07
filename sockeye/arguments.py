@@ -1172,19 +1172,15 @@ def add_training_args(params):
                               help="Do not perform any actual training, but print statistics about the model"
                               " and mode of operation.")
 
-def add_attention_loss(params):
-    params = params.add_argument_group("Monotone attention loss parameters")
-    params.add_argument('--attention-monotonicity-loss',
+def add_learned_positions_args(params):
+    params = params.add_argument_group("Parameters for learning multilingual positional embeddings")
+    params.add_argument('--multilingual-positional-embeddings',
                               action='store_true',
                               help="Use additional loss to encourage monotone decoder-encoder attention.")
-    params.add_argument('--attention-monotonicity-loss-lambda',
+    params.add_argument('--positional-attention-loss-lambda',
                               type=float,
                               default=0.5,
-                              help='Scale monotone attention loss by lambda, CE loss will be scaled by (1-lambda). Default: %(default)s.')
-    params.add_argument('--attention-monotonicity-loss-layers',
-                              choices=C.ATTENTION_MONOTONICITY_LOSS_LAYERS,
-                              default=C.ATTENTION_MONOTONICITY_LOSS_LAYER_LAST,
-                              help='Which layers are used to calculate monotone attention loss. Default: %(default)s.')
+                              help='Scale monotone attention loss on learned positional embeddings by lambda, CE loss will be scaled by (1-lambda). Default: %(default)s.')
 
 def add_train_cli_args(params):
     add_training_io_args(params)
@@ -1192,7 +1188,7 @@ def add_train_cli_args(params):
     add_training_args(params)
     add_device_args(params)
     add_logging_args(params)
-    add_attention_loss(params)
+    add_learned_positions_args(params)
 
 
 def add_translate_cli_args(params):

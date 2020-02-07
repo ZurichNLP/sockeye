@@ -42,7 +42,9 @@ class TransformerConfig(config.Config):
                  conv_config: Optional['encoder.ConvolutionalEmbeddingConfig'] = None,
                  lhuc: bool = False,
                  dtype: str = C.DTYPE_FP32,
-                 return_dec_enc_att_probs: Optional[bool] = False) -> None:  # type: ignore
+                 return_dec_enc_att_probs: Optional[bool] = False,
+                 positional_attention: Optional[bool] = False,
+                 non_en_id: Optional[int] = None) -> None:  # type: ignore
         super().__init__()
         self.model_size = model_size
         self.attention_heads = attention_heads
@@ -61,6 +63,8 @@ class TransformerConfig(config.Config):
         self.use_lhuc = lhuc
         self.dtype = dtype
         self.return_dec_enc_att_probs = return_dec_enc_att_probs
+        self.positional_attention = positional_attention
+        self.non_en_id = non_en_id
 
 
 class TransformerEncoderBlock(mx.gluon.HybridBlock):
@@ -71,7 +75,8 @@ class TransformerEncoderBlock(mx.gluon.HybridBlock):
 
     def __init__(self,
                  config: TransformerConfig,
-                 prefix: str) -> None:
+                 prefix: str,
+                 has_positional_embedding_layer: Optional[bool] = False) -> None:
         super().__init__(prefix=prefix)
 
         with self.name_scope():
@@ -101,12 +106,19 @@ class TransformerEncoderBlock(mx.gluon.HybridBlock):
             self.lhuc = None
             if config.use_lhuc:
                 self.lhuc = layers.LHUC(config.model_size)
+            
+            self.positional_embedding_layer = None
+            if has_positional_embedding_layer:
+                self.positional_embedding_layer = layers.MultilingualPositionalEmbeddingsLayer(model_size=config.model_size, prefix=C.MULTILINGUAL_POSITIONAL_EMBEDDINGS_LAYER_PREFIX, non_en_id=config.non_en_id)
 
-    def hybrid_forward(self, F, data: mx.sym.Symbol, bias: mx.sym.Symbol) -> mx.sym.Symbol:
+    def hybrid_forward(self, F, data: mx.sym.Symbol, bias: mx.sym.Symbol, pos_embed: Optional[mx.sym.Symbol] = None, source: Optional[mx.sym.Symbol] = None, source_lengths: Optional[mx.sym.Symbol] = None) -> mx.sym.Symbol:
         # self-attention
         data_self_att = self.self_attention(self.pre_self_attention(data, None), None, bias, None)
         data = self.post_self_attention(data_self_att, data)
-
+        
+        if self.positional_embedding_layer is not None:
+            data, test = self.positional_embedding_layer(data, pos_embed, source, source_lengths)
+            return data, test
         # feed-forward
         data_ff = self.ff(self.pre_ff(data, None))
         data = self.post_ff(data_ff, data)
@@ -115,7 +127,6 @@ class TransformerEncoderBlock(mx.gluon.HybridBlock):
             data = self.lhuc(data)
 
         return data
-
 
 class TransformerDecoderBlock(mx.gluon.HybridBlock):
     """
@@ -332,3 +343,5 @@ def get_autoregressive_bias(max_length: int, dtype: str = C.DTYPE_FP32) -> mx.sy
     bias = bias * -C.LARGE_VALUES[dtype]
     bias = mx.sym.reshape(bias, shape=(1, max_length, max_length))
     return mx.sym.BlockGrad(bias)
+
+

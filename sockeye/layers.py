@@ -465,7 +465,6 @@ class MultiHeadAttentionBase(mx.gluon.HybridBlock):
         """
         # scale by sqrt(depth_per_head)
         queries = queries * (self.depth_per_head ** -0.5)
-
         # (batch*heads, length, depth/heads)
         queries = split_heads(F, queries, self.depth_per_head, self.heads)
         keys = split_heads(F, keys, self.depth_per_head, self.heads)
@@ -663,3 +662,74 @@ class ProjectedDotAttention(mx.gluon.HybridBlock):
         contexts = self.dot_att(queries, keys, values, memory_lengths, None)
 
         return contexts
+
+class MultilingualPositionalEmbeddingsLayer(mx.gluon.HybridBlock):
+    
+    
+    def __init__(self, 
+                model_size: int, 
+                prefix: str = C.MULTILINGUAL_POSITIONAL_EMBEDDINGS_LAYER_PREFIX,
+                non_en_id: Optional[int] = None) -> None:
+        super().__init__(prefix=prefix)
+        self.non_en_id = non_en_id
+        
+        with self.name_scope():
+            # TODO: dropout?
+            self.hidden2pos_attention = MultiHeadAttention(depth_att=model_size,
+                                                            heads=1,
+                                                            depth_out=model_size,
+                                                            dropout=0.0,
+                                                            prefix="hidden2pos_att_",
+                                                            return_probs=True)
+            
+    def hybrid_forward(self, F,
+                data: mx.sym.Symbol,
+                pos_embed: mx.sym.Symbol,
+                source: mx.sym.Symbol,
+                source_lengths: mx.sym.Symbol):
+        
+                """
+                Weigh learned positional embeddings, add to non-English sentences, add original positional embeddings to English sentences.
+                :param data: Encoder hidden state of last layer, before FF. Symbol of shape (batch, src_len, encoder_num_hidden).
+                :param pos_embed: Original learned positional embeddings. Symbol of shape (1, src_len, encoder_num_hidden).
+                :param source: source sentences. Symbol of shape(batch, src_len, num_factors).
+                :param source_lengths: Length of source sentences in batch without padding. Symbol of shape(batch, ).
+                :return: Symbol of shape (batch, queries_max_length, num_hidden).
+                """
+        
+                ## position_probs: (batch_size * attention_heads=1, source_length(=queries), source_length(=keys))
+                ## context shape: (batch_size * attention_heads=1, source_length, model_size)
+                # repeat positional_embeddings batch_size times to match data, need actual batch size
+                ones = mx.sym.ones_like(data)
+                pos_embed = mx.sym.broadcast_mul(ones, pos_embed)
+                
+                context, position_probs = self.hidden2pos_attention(data, pos_embed, source_lengths, None) # position_probs (batch, src_len, pos_len=src_len), context (batch, src_len, encoder_num_hidden)
+                # get weighted embeddings
+                non_en_weighted_embeddings = mx.sym.broadcast_mul(pos_embed, context) # (batch, src_len, encoder_num_hidden)
+                # add weighted positional embeddings to non-English data
+                non_en_data = mx.sym.broadcast_add(data, non_en_weighted_embeddings)
+                
+                ## get mask for non-English sentences (batch, 1, 1) where non-English sentences =1, English = 0
+                non_en_mask = (source == self.non_en_id) # shape (batch, src_len, 1)
+                non_en_mask = mx.sym.sum(non_en_mask, axis=1) # (batch, 1) 
+                non_en_mask = mx.sym.expand_dims(non_en_mask, axis=1) # (batch, 1,1)
+                non_en_data = mx.sym.broadcast_mul(non_en_mask, non_en_data) # data + weighted positions for non-English sentences, 0 for English sentences, # (batch, src_len, encoder_num_hidden)
+
+                # English mask: 1 for en sentences, 0 for others -> inverse of mask
+                en_mask = (non_en_mask == 0)
+                # add original positional embeddings to English data
+                en_data = mx.sym.broadcast_add(data, pos_embed)
+                en_data = mx.sym.broadcast_mul(en_mask, en_data) # data + positions for English sentences, 0 for non-English sentences, # (batch, src_len, encoder_num_hidden)
+                data = mx.sym.broadcast_add(en_data, non_en_data) 
+                return data, position_probs
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        

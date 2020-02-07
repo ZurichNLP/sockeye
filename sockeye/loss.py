@@ -66,8 +66,8 @@ def get_loss(config: LossConfig) -> 'Loss':
         return CrossEntropyLoss(config,
                                 output_names=[C.SOFTMAX_OUTPUT_NAME],
                                 label_names=[C.TARGET_LABEL_NAME])
-    elif config.name == C.ATTENTION_MONOTONICITY_LOSS:
-        return AttentionMonotonicity(config)
+    elif config.name == C.MULTILINGUAL_POSITIONAL_ATTENTION_LOSS:
+        return MultilingualPositionalAttention(config)
     else:
         raise ValueError("unknown loss name: %s" % config.name)
 
@@ -236,34 +236,26 @@ class CrossEntropyMetric(EvalMetric):
 
             self.sum_metric += ce.asscalar()
 
-class AttentionMonotonicity(Loss):
+class MultilingualPositionalAttention(Loss):
     """
     Computes the attention monotonicity loss.
 
     :param loss_config: Loss configuration.
+    TODO: change this -> use attention on positions
     """
 
     def __init__(self, loss_config: LossConfig) -> None:
-        logger.info("Loss: AttentionMonotonicity")
+        logger.info("Loss: MultilingualPositionalAttention")
         self.loss_config = loss_config
     
     def get_loss(self, 
                  attention_scores_list: List[mx.sym.Symbol],
                  num_attention_heads: int,
                  target_words: mx.sym.Symbol,
-                 layers: Optional[str] = 'last', # 'last' or 'all' layers
                  grad_scale: Optional[float] = 0.5) -> List[mx.sym.Symbol]:
         
-        if layers == "last":
-            loss = self.monotonicity_score_per_layer(attention_scores_list[-1], num_attention_heads, target_words)
         
-        else:
-            accumulated_loss = mx.sym.zeros_like(attention_scores_list[0])
-            for layer_scores in attention_scores_list:
-                layer_loss = self.monotonicity_score_per_layer(layer_scores, num_attention_heads, target_words) # (batch,)
-                accumulated_loss = accumulated_loss + layer_loss
-            
-            loss = mx.sym.mean(accumulated_loss, axis=0)
+        loss = self.monotonicity_score_per_layer(attention_scores_list[-1], num_attention_heads, target_words)
         
         return mx.sym.MakeLoss(loss,
                                 grad_scale=grad_scale)
@@ -319,17 +311,17 @@ class AttentionMonotonicity(Loss):
         layer_loss = mx.sym.sum(adjacent_pos_difference, axis=1) # (batch, )
         return layer_loss
 
-    def create_metric(self) -> "AttentionMonotonicityMetric":
-        return AttentionMonotonicityMetric(self.loss_config)
+    def create_metric(self) -> "MultilingualPositionalAttentionMetric":
+        return MultilingualPositionalAttentionMetric(self.loss_config)
         
 
-class AttentionMonotonicityMetric(EvalMetric):
+class MultilingualPositionalAttentionMetric(EvalMetric):
     """
     Calculate the monotonicity of attention scores (averaged over decoder layers).
     """
     def __init__(self,
                  loss_config: LossConfig,
-                 name: str = C.ATTENTION_MONOTONICITY_LOSS,
+                 name: str = C.MULTILINGUAL_POSITIONAL_ATTENTION_LOSS,
                  output_names: Optional[List[str]] = None,
                  label_names: Optional[List[str]] = None) -> None:
         super().__init__(name, output_names=output_names, label_names=label_names)

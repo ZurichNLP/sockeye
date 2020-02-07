@@ -103,6 +103,10 @@ def check_arg_compatibility(args: argparse.Namespace):
     if args.attention_based_copying:
         check_condition(args.decoder == C.RNN_NAME,
                         "The attention-based copying mechanism currently supports RNN decoders only.")
+        
+    if args.multilingual_positional_embeddings:
+        check_condition(args.decoder == C.TRANSFORMER_TYPE and args.transformer_positional_embedding_type == C.LEARNED_POSITIONAL_EMBEDDING,
+                        "Option multilingual positional embeddings only available with transformer decoder. Embedding type needs to be 'learned'.")
 
 
 def check_resume(args: argparse.Namespace, output_folder: str) -> bool:
@@ -357,7 +361,8 @@ def create_encoder_config(args: argparse.Namespace,
                           max_seq_len_source: int,
                           max_seq_len_target: int,
                           config_conv: Optional[encoder.ConvolutionalEmbeddingConfig],
-                          num_embed_source: int) -> Tuple[encoder.EncoderConfig, int]:
+                          num_embed_source: int,
+                          non_en_id: Optional[int] = None) -> Tuple[encoder.EncoderConfig, int]:
     """
     Create the encoder config.
 
@@ -405,6 +410,8 @@ def create_encoder_config(args: argparse.Namespace,
             max_seq_len_source=max_seq_len_source,
             max_seq_len_target=max_seq_len_target,
             conv_config=config_conv,
+            positional_attention=args.multilingual_positional_embeddings,
+            non_en_id=non_en_id,
             lhuc=args.lhuc is not None and (C.LHUC_ENCODER in args.lhuc or C.LHUC_ALL in args.lhuc))
         encoder_num_hidden = encoder_transformer_model_size
     elif args.encoder == C.CONVOLUTION_TYPE:
@@ -483,7 +490,7 @@ def create_decoder_config(args: argparse.Namespace, encoder_num_hidden: int,
             max_seq_len_target=max_seq_len_target,
             conv_config=None,
             lhuc=args.lhuc is not None and (C.LHUC_DECODER in args.lhuc or C.LHUC_ALL in args.lhuc),
-            return_dec_enc_att_probs=args.attention_monotonicity_loss)
+            return_dec_enc_att_probs=args.multilingual_positional_embeddings)
 
     elif args.decoder == C.CONVOLUTION_TYPE:
         if args.decoder_only:
@@ -624,7 +631,8 @@ def create_model_config(args: argparse.Namespace,
                         target_vocab_size: int,
                         max_seq_len_source: int,
                         max_seq_len_target: int,
-                        config_data: data_io.DataConfig) -> model.ModelConfig:
+                        config_data: data_io.DataConfig, 
+                        non_en_id: Optional[int] = None) -> model.ModelConfig:
     """
     Create a ModelConfig from the argument given in the command line.
 
@@ -661,7 +669,7 @@ def create_model_config(args: argparse.Namespace,
                                                            dropout=args.conv_embed_dropout)
 
     config_encoder, encoder_num_hidden = create_encoder_config(args, max_seq_len_source, max_seq_len_target,
-                                                               config_conv, num_embed_source)
+                                                               config_conv, num_embed_source, non_en_id)
     config_decoder = create_decoder_config(args, encoder_num_hidden, max_seq_len_source, max_seq_len_target,
                                            num_embed_target)
 
@@ -693,8 +701,8 @@ def create_model_config(args: argparse.Namespace,
                                   label_smoothing=args.label_smoothing)
     
     monotonicity_config_loss = None
-    if args.attention_monotonicity_loss:
-        monotonicity_config_loss = loss.LossConfig(name='attention-monotonicity',
+    if args.multilingual_positional_embeddings:
+        multilingual_positional_config_loss = loss.LossConfig(name='multilingual-positional-attention-loss',
                                   vocab_size=None,
                                   normalization_type=None,
                                   label_smoothing=None)
@@ -724,7 +732,7 @@ def create_model_config(args: argparse.Namespace,
                                      weight_normalization=args.weight_normalization,
                                      lhuc=args.lhuc is not None,
                                      num_pointers=num_pointers,
-                                     attention_monotonicity_loss=monotonicity_config_loss)
+                                     multilingual_positional_config_loss=multilingual_positional_config_loss)
     return model_config
 
 
@@ -743,8 +751,8 @@ def create_training_model(config: model.ModelConfig,
     :param args: Arguments as returned by argparse.
     :return: The training model.
     """
-    if args.attention_monotonicity_loss:
-        training_model = training.MonotoneAttentionModel(config=config,
+    
+    training_model = training.TrainingModel(config=config,
                                             context=context,
                                             output_dir=output_dir,
                                             provide_data=train_iter.provide_data,
@@ -755,21 +763,8 @@ def create_training_model(config: model.ModelConfig,
                                             gradient_accumulation=args.update_interval > 1,
                                             fixed_param_names=args.fixed_param_names,
                                             fixed_param_strategy=args.fixed_param_strategy,
-                                            monotone_attention_loss_lambda=args.attention_monotonicity_loss_lambda,
-                                            attention_monotonicity_loss_layers=args.attention_monotonicity_loss_layers)
+                                            positional_attention_loss_lambda=args.positional_attention_loss_lambda)
         
-    else:
-        training_model = training.TrainingModel(config=config,
-                                            context=context,
-                                            output_dir=output_dir,
-                                            provide_data=train_iter.provide_data,
-                                            provide_label=train_iter.provide_label,
-                                            default_bucket_key=train_iter.default_bucket_key,
-                                            bucketing=not args.no_bucketing,
-                                            gradient_compression_params=gradient_compression_params(args),
-                                            gradient_accumulation=args.update_interval > 1,
-                                            fixed_param_names=args.fixed_param_names,
-                                            fixed_param_strategy=args.fixed_param_strategy)
     
     
 
@@ -927,6 +922,10 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
             output_folder=output_folder)
         max_seq_len_source = config_data.max_seq_len_source
         max_seq_len_target = config_data.max_seq_len_target
+        
+        non_en_id = None
+        if args.multilingual_positional_embeddings:
+            non_en_id = source_vocabs[0][C.NON_EN_SYMBOL]
 
         # Dump the vocabularies if we're just starting up
         if not resume_training:
@@ -942,7 +941,8 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
         model_config = create_model_config(args=args,
                                            source_vocab_sizes=source_vocab_sizes, target_vocab_size=target_vocab_size,
                                            max_seq_len_source=max_seq_len_source, max_seq_len_target=max_seq_len_target,
-                                           config_data=config_data)
+                                           config_data=config_data,
+                                           non_en_id=non_en_id)
         model_config.freeze()
 
         training_model = create_training_model(config=model_config,

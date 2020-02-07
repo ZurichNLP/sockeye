@@ -216,7 +216,6 @@ def get_transformer_encoder(config: transformer.TransformerConfig, prefix: str) 
                            prefix=prefix + C.CHAR_SEQ_ENCODER_PREFIX)
 
     encoder_seq.append(TransformerEncoder, config=config, prefix=prefix + C.TRANSFORMER_ENCODER_PREFIX)
-
     return encoder_seq
 
 
@@ -560,7 +559,7 @@ class AddSinCosPositionalEmbeddings(PositionalEncoder):
 
         pos_embedding = mx.sym.BlockGrad(pos_embedding)
 
-        return mx.sym.broadcast_add(data, pos_embedding, name="%s_add" % self.prefix)
+        return mx.sym.broadcast_add(data, pos_embedding, name="%s_add" % self.prefix), None
 
     def get_num_hidden(self) -> int:
         return self.num_embed
@@ -596,7 +595,8 @@ class AddLearnedPositionalEmbeddings(PositionalEncoder):
     def encode(self,
                data: mx.sym.Symbol,
                data_length: Optional[mx.sym.Symbol],
-               seq_len: int) -> Tuple[mx.sym.Symbol, mx.sym.Symbol, int]:
+               seq_len: int,
+               get_pos_embed: Optional[bool] = False) -> Tuple[mx.sym.Symbol, mx.sym.Symbol, int]:
         """
         :param data: (batch_size, source_seq_len, num_embed)
         :param data_length: (batch_size,)
@@ -613,7 +613,10 @@ class AddLearnedPositionalEmbeddings(PositionalEncoder):
                                          weight=self.embed_weight,
                                          output_dim=self.num_embed,
                                          name=self.prefix + "pos_embed")
-        return mx.sym.broadcast_add(data, pos_embedding, name="%s_add" % self.prefix), data_length, seq_len
+        if get_pos_embed:
+            return mx.sym.broadcast_add(data, pos_embedding, name="%s_add" % self.prefix), data_length, seq_len, pos_embedding
+        else:
+            return mx.sym.broadcast_add(data, pos_embedding, name="%s_add" % self.prefix), data_length, seq_len
 
     def encode_positions(self,
                          positions: mx.sym.Symbol,
@@ -717,7 +720,9 @@ class EncoderSequence(Encoder):
     def encode(self,
                data: mx.sym.Symbol,
                data_length: mx.sym.Symbol,
-               seq_len: int) -> Tuple[mx.sym.Symbol, mx.sym.Symbol, int]:
+               seq_len: int,
+               get_pos_embed: Optional[bool] = False,
+               source: Optional[mx.sym.Symbol] = None) -> Tuple[mx.sym.Symbol, mx.sym.Symbol, int]:
         """
         Encodes data given sequence lengths of individual examples and maximum sequence length.
 
@@ -726,9 +731,16 @@ class EncoderSequence(Encoder):
         :param seq_len: Maximum sequence length.
         :return: Encoded versions of input data (data, data_length, seq_len).
         """
-        for encoder in self.encoders:
-            data, data_length, seq_len = encoder.encode(data, data_length, seq_len)
-        return data, data_length, seq_len
+        if get_pos_embed:
+            data, data_length, seq_len, pos_embed = self.encoders[0].encode(data, data_length, seq_len, get_pos_embed)
+            for encoder in range(len(self.encoders)-1, 1):
+                data, data_length, seq_len, pos_embed = encoder.encode(data, data_length, seq_len, pos_embed, source)
+            (data, position_probs), data_length, seq_len, pos_embed = self.encoders[-1].encode(data, data_length, seq_len, pos_embed, source)
+            return data, data_length, seq_len, pos_embed, position_probs
+        else:
+            for encoder in self.encoders:
+                data, data_length, seq_len = encoder.encode(data, data_length, seq_len)
+            return data, data_length, seq_len
 
     def get_num_hidden(self) -> int:
         """
@@ -1033,8 +1045,14 @@ class TransformerEncoder(Encoder, mx.gluon.HybridBlock):
 
         with self.name_scope():
             self.layers = mx.gluon.nn.HybridSequential()
-            for i in range(config.num_layers):
-                self.layers.add(transformer.TransformerEncoderBlock(config, prefix="%d_" % i))
+            if config.positional_attention:
+                for i in range(config.num_layers-1):
+                    self.layers.add(transformer.TransformerEncoderBlock(config, prefix="%d_" % i))
+                # add positional embedding layer to last TransformerEncoderBlock
+                self.layers.add(transformer.TransformerEncoderBlock(config, prefix="%d_" % config.num_layers, has_positional_embedding_layer=True))
+            else:
+                for i in range(config.num_layers):
+                    self.layers.add(transformer.TransformerEncoderBlock(config, prefix="%d_" % i))
             self.valid_length_mask = transformer.TransformerValidLengthMask(num_heads=self.config.attention_heads,
                                                                             fold_heads=True,
                                                                             name="bias")
@@ -1045,7 +1063,7 @@ class TransformerEncoder(Encoder, mx.gluon.HybridBlock):
     def hybrid_forward(self, F, data, data_length):
         return self._encode(F, data, data_length)
 
-    def _encode(self, F, data: mx.sym.Symbol, data_length: mx.sym.Symbol) -> mx.sym.Symbol:
+    def _encode(self, F, data: mx.sym.Symbol, data_length: mx.sym.Symbol, pos_embed: Optional[mx.sym.Symbol] = None, source: Optional[mx.sym.Symbol] = None) -> mx.sym.Symbol:
         data = utils.cast_conditionally(F, data, self.dtype)
         if self.config.dropout_prepost > 0.0:
             data = F.Dropout(data=data, p=self.config.dropout_prepost)
@@ -1053,17 +1071,28 @@ class TransformerEncoder(Encoder, mx.gluon.HybridBlock):
         # (batch_size * heads, 1, seq_len)
         bias = F.expand_dims(self.valid_length_mask(data, data_length), axis=1)
         bias = utils.cast_conditionally(F, bias, self.dtype)
-        for layer in self.layers:
-            # (batch_size, seq_len, config.model_size)
-            data = layer(data, bias)
-        data = self.final_process(data, None)
-        data = utils.uncast_conditionally(F, data, self.dtype)
-        return data
+        if pos_embed is not None:
+            for i in range(len(self.layers)-1):
+                data = layer(data, bias)
+            # last layer: positonal embeddings
+            data, position_probs = self.layers[-1](data, bias, pos_embed, source, data_length)
+            data = self.final_process(data, None)
+            data = utils.uncast_conditionally(F, data, self.dtype)
+            return (data, position_probs)
+        else:
+            for layer in self.layers:
+                # (batch_size, seq_len, config.model_size)
+                data = layer(data, bias)
+            data = self.final_process(data, None)
+            data = utils.uncast_conditionally(F, data, self.dtype)
+            return data
 
     def encode(self,
                data: mx.sym.Symbol,
                data_length: Optional[mx.sym.Symbol],
-               seq_len: int):
+               seq_len: int,
+               pos_embed: Optional[mx.sym.Symbol] = None,
+               source: Optional[mx.sym.Symbol] = None):
         """
         Encodes data given sequence lengths of individual examples and maximum sequence length.
 
@@ -1072,7 +1101,10 @@ class TransformerEncoder(Encoder, mx.gluon.HybridBlock):
         :param seq_len: Maximum sequence length.
         :return: Encoded versions of input data data, data_length, seq_len.
         """
-        return self._encode(mx.sym, data, data_length), data_length, seq_len
+        if pos_embed is not None:
+            return self._encode(mx.sym, data, data_length, pos_embed, source), data_length, seq_len, pos_embed
+        else:    
+            return self._encode(mx.sym, data, data_length), data_length, seq_len
 
     def get_num_hidden(self) -> int:
         """
@@ -1299,3 +1331,5 @@ EncoderConfig = Union[RecurrentEncoderConfig, transformer.TransformerConfig, Con
                       EmptyEncoderConfig]
 if ImageEncoderConfig is not None:
     EncoderConfig = Union[EncoderConfig, ImageEncoderConfig]  # type: ignore
+
+    
