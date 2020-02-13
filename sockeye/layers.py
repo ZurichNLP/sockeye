@@ -697,9 +697,8 @@ class MultilingualPositionalEmbeddingsLayer(mx.gluon.HybridBlock):
                 :return: Symbol of shape (batch, queries_max_length, num_hidden).
                 """
         
-                ## position_probs: (batch_size * attention_heads=1, source_length(=queries), source_length(=keys))
-                ## context shape: (batch_size * attention_heads=1, source_length, model_size)
-                # repeat positional_embeddings batch_size times to match data, need actual batch size
+                # position_probs: (batch_size * attention_heads=1, source_length(=queries), source_length(=keys))
+                # context shape: (batch_size * attention_heads=1, source_length, model_size)
                 ones = mx.sym.ones_like(data)
                 pos_embed = mx.sym.broadcast_mul(ones, pos_embed)
                 

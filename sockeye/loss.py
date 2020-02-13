@@ -250,12 +250,13 @@ class MultilingualPositionalAttention(Loss):
     
     def get_loss(self, 
                  attention_scores_list: List[mx.sym.Symbol],
+                 positional_attention: mx.sym.Symbol,
                  num_attention_heads: int,
                  target_words: mx.sym.Symbol,
                  grad_scale: Optional[float] = 0.5) -> List[mx.sym.Symbol]:
         
         
-        loss = self.monotonicity_score_per_layer(attention_scores_list[-1], num_attention_heads, target_words)
+        loss = self.monotonicity_score_per_layer(attention_scores_list[-1], positional_attention, num_attention_heads, target_words)
         
         return mx.sym.MakeLoss(loss,
                                 grad_scale=grad_scale)
@@ -263,11 +264,13 @@ class MultilingualPositionalAttention(Loss):
     
     def monotonicity_score_per_layer(self, 
                                      attention_scores: mx.sym.Symbol,
+                                     positional_attention: mx.sym.Symbol,
                                      num_attention_heads: int,
                                      target_words: mx.sym.Symbol):
         """
-        param attention_scores: decoder-encoder attention scores (MultiHeadAttention), shape (batch_size * attention_heads, target_length, source_length)
-        param target_words: target words, used to remove padding. shape (batch_size * target_length)
+        param attention_scores: decoder-encoder attention scores (MultiHeadAttention). Shape (batch_size * attention_heads, target_length, source_length)
+        param positional_attention: Attention from encoder layer hidden states (after self-attention) to positions. Shape (batch, src_len, pos_len=src_len)
+        param target_words: target words, used to remove padding. Shape (batch_size * target_length)
         param default_bucket_key: Tuple of (max_source_length, max_target_length). Need max_source_length to create position matrix with arange.
         """
         
@@ -275,12 +278,13 @@ class MultilingualPositionalAttention(Loss):
         attention_scores = attention_scores.reshape(shape=(-4, -1, num_attention_heads, -2)) # (batch_size, attention_heads, target_length, source_length)
         attention_scores = mx.sym.mean(attention_scores, axis=1) # (batch_size, target_length, source_length)
         
+        # take dot product of positional attention and actual positions
+        source_positions = mx.contrib.sym.arange_like(data=positional_attention, start=1, axis=-1) # (src_len,)
+        weighted_source_positions = mx.sym.dot(positional_attention, source_positions) # (batch, src_len)
+        weighted_source_positions = weighted_source_positions.expand_dims(axis=1) # (batch, 1, src_len)
+        
         p = mx.sym.ones_like(attention_scores) # (batch_size, target_length, source_length)
-        positions = mx.contrib.sym.arange_like(data=attention_scores, start=1, axis=-1) # (source_length, ) NOTE: needs mxnet-1.6.0
-        
-        positions = positions.reshape(shape=(1,1, -1))  # (1, 1, source_length)
-        positions = mx.sym.broadcast_mul(p, positions) # shape(batch, target_length, source_length), values in source_length = arange(source_length) 
-        
+        positions = mx.sym.broadcast_mul(p, weighted_source_positions) # shape(batch, target_length, source_length), values in source_length = arange(source_length) 
         
         # no need to remove padding from source, padded positions are 0 in attention scores
         positionally_weighted_attention = mx.sym.broadcast_mul(attention_scores, positions) # shape(batch_size, target_length, source_length (attention_score*position))

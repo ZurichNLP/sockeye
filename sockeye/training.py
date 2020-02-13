@@ -110,7 +110,7 @@ class TrainingModel(model.SockeyeModel):
         else:
             self.length_task_loss = None
         
-        self.multilingual_positional_config_loss = loss.get_loss(self.config.multilingual_positional_config_loss)
+        self.multilingual_positional_loss = loss.get_loss(self.config.multilingual_positional_config_loss)
 
         data_names = [C.SOURCE_NAME, C.TARGET_NAME]
         label_names = [C.TARGET_LABEL_NAME]
@@ -189,12 +189,13 @@ class TrainingModel(model.SockeyeModel):
                 net_outputs.extend([loss_symbol,
                                     mx.sym.BlockGrad(predicted_length_ratio, name=C.LENRATIO_NAME),
                                     mx.sym.BlockGrad(length_ratio, name=C.LENRATIO_LABEL_NAME)])
-            # TODO: change loss function
-            loss_attention = [self.multilingual_positional_config_loss.get_loss(attention_scores_list=attention_scores_list,
-                                                                        num_attention_heads=self.config.config_decoder.attention_heads,
-                                                                        target_words=target_words, 
-                                                                        grad_scale=self._positional_attention_loss_lambda)] #TODO needs --no-bucketing
             
+            loss_attention = [self.multilingual_positional_loss.get_loss(attention_scores_list=attention_scores_list,
+                                                                                positional_attention=position_probs,
+                                                                                num_attention_heads=self.config.config_decoder.attention_heads,
+                                                                                target_words=target_words, 
+                                                                                grad_scale=self._positional_attention_loss_lambda)] 
+                                          
             return mx.sym.Group(net_outputs + loss_attention), data_names, label_names
 
         # Fix model parameters as needed for different training options.
@@ -709,9 +710,9 @@ class EarlyStoppingTrainer:
 
         metric_train, metric_val, metric_loss = self._create_metrics(metrics, self.model.optimizer, self.model.loss)
         multilingual_positional_attention_loss = None
-        if hasattr(self.model, 'multilingual_positional_attention_loss')  and self.model.multilingual_positional_attention_loss is not None:
-            multilingual_positional_attention_loss = self.model.multilingual_positional_attention_loss.create_metric()
-
+        if hasattr(self.model, 'multilingual_positional_loss')  and self.model.multilingual_positional_loss is not None:
+            multilingual_positional_attention_loss = self.model.multilingual_positional_loss.create_metric()
+        
         process_manager = None
         if decoder is not None:
             process_manager = DecoderProcessManager(self.model.output_dir, decoder=decoder)
