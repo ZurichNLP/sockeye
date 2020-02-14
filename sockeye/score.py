@@ -28,6 +28,7 @@ from . import model
 from . import scoring
 from . import utils
 from . import vocab
+from . import transformer
 from .log import setup_main_logger
 from .output_handler import get_output_handler
 from .utils import check_condition
@@ -113,6 +114,11 @@ def score(args: argparse.Namespace):
         score_iter, source_vocabs, target_vocab, model_config = get_data_iters_and_vocabs(
             args=args,
             model_folder=args.model)
+        
+        if args.positional_attention_monotonicity_scoring is not None:
+            print(model_config.config_decoder)
+            check_condition(isinstance(model_config.config_decoder, transformer.TransformerConfig) and isinstance(model_config.config_encoder, transformer.TransformerConfig) and model_config.config_encoder.positional_embedding_type == C.LEARNED_POSITIONAL_EMBEDDING,
+                        "Scoring with attention on positional embeddings only available with transformer models. Embedding type needs to be 'learned'.")
 
         scoring_model = scoring.ScoringModel(config=model_config,
                                              model_dir=args.model,
@@ -126,7 +132,8 @@ def score(args: argparse.Namespace):
                                              brevity_penalty=inference.BrevityPenalty(weight=args.brevity_penalty_weight),
                                              softmax_temperature=args.softmax_temperature,
                                              brevity_penalty_type=args.brevity_penalty_type,
-                                             constant_length_ratio=args.brevity_penalty_constant_length_ratio)
+                                             constant_length_ratio=args.brevity_penalty_constant_length_ratio,
+                                             positional_attention_scoring=args.positional_attention_monotonicity_scoring)
 
         scorer = scoring.Scorer(scoring_model, source_vocabs, target_vocab)
 

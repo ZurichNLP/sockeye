@@ -279,7 +279,7 @@ class MultilingualPositionalAttention(Loss):
         attention_scores = mx.sym.mean(attention_scores, axis=1) # (batch_size, target_length, source_length)
         
         # take dot product of positional attention and actual positions
-        source_positions = mx.contrib.sym.arange_like(data=positional_attention, start=1, axis=-1) # (src_len,)
+        source_positions = mx.contrib.sym.arange_like(data=positional_attention, start=1, axis=-1) # (src_len,), needs mxnet-1.6!
         weighted_source_positions = mx.sym.dot(positional_attention, source_positions) # (batch, src_len)
         weighted_source_positions = weighted_source_positions.expand_dims(axis=1) # (batch, 1, src_len)
         

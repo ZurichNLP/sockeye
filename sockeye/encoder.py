@@ -1073,6 +1073,7 @@ class TransformerEncoder(Encoder, mx.gluon.HybridBlock):
         bias = utils.cast_conditionally(F, bias, self.dtype)
         if pos_embed is not None:
             for i in range(len(self.layers)-1):
+                layer = self.layers[i]
                 data = layer(data, bias)
             # last layer: positonal embeddings
             data, position_probs = self.layers[-1](data, bias, pos_embed, source, data_length)

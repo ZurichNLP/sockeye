@@ -29,6 +29,7 @@ from . import inference
 from . import model
 from . import utils
 from . import vocab
+from . import loss
 from .inference import TranslatorInput, TranslatorOutput
 from .output_handler import OutputHandler
 
@@ -65,13 +66,15 @@ class ScoringModel(model.SockeyeModel):
                  brevity_penalty: inference.BrevityPenalty,
                  softmax_temperature: Optional[float] = None,
                  brevity_penalty_type: str = '',
-                 constant_length_ratio: float = 0.0) -> None:
+                 constant_length_ratio: float = 0.0,
+                 positional_attention_scoring: Optional[bool] = False) -> None:
         super().__init__(config)
         self.context = context
         self.score_type = score_type
         self.length_penalty = length_penalty
         self.brevity_penalty = brevity_penalty
         self.softmax_temperature = softmax_temperature
+        self.positional_attention_scoring = positional_attention_scoring
 
         if brevity_penalty_type == C.BREVITY_PENALTY_CONSTANT:
             if constant_length_ratio <= 0.0:
@@ -112,6 +115,7 @@ class ScoringModel(model.SockeyeModel):
         source_length = utils.compute_lengths(source_words)
         target = mx.sym.Variable(C.TARGET_NAME)
         target_length = utils.compute_lengths(target)
+        target_words = mx.sym.reshape(data=target, shape=(-1,), name="target_words")
 
         # labels shape: (batch_size, target_length) (usually the maximum target sequence length)
         labels = mx.sym.Variable(C.TARGET_LABEL_NAME)
@@ -126,6 +130,10 @@ class ScoringModel(model.SockeyeModel):
         provide_label_names = [d[0] for d in provide_label]
         utils.check_condition(provide_label_names == label_names,
                               "incompatible provide_label: %s, names should be %s" % (provide_label_names, label_names))
+        
+        self.positional_attention_scorer=None
+        if self.positional_attention_scoring:
+            self.positional_attention_scorer = loss.MultilingualPositionalAttention(self.config)
 
         def sym_gen(seq_lens):
             """
@@ -149,13 +157,16 @@ class ScoringModel(model.SockeyeModel):
             # source_encoded: (batch_size, source_encoded_length, encoder_depth)
             (source_encoded,
              source_encoded_length,
-             source_encoded_seq_len) = self.encoder.encode(source_embed,
+             source_encoded_seq_len,
+             pos_embed, position_probs) = self.encoder.encode(source_embed,
                                                            source_embed_length,
-                                                           source_embed_seq_len)
+                                                           source_embed_seq_len,
+                                                           get_pos_embed=True,
+                                                           source=source)
 
             # decoder
             # target_decoded: (batch-size, target_len, decoder_depth)
-            target_decoded, pointer_scores = self.decoder.decode_sequence(source_encoded, source_encoded_length, source_encoded_seq_len,
+            target_decoded, pointer_scores, attention_scores_list = self.decoder.decode_sequence(source_encoded, source_encoded_length, source_encoded_seq_len,
                                                           target_embed, target_embed_length, target_embed_seq_len)
 
             # output layer
@@ -196,10 +207,18 @@ class ScoringModel(model.SockeyeModel):
                 length_ratio = self.length_ratio(source_encoded, source_encoded_length).reshape((-1,)) \
                                     if self.length_ratio is not None else mx.sym.zeros_like(sums)
             sums = sums - self.brevity_penalty(target_length - 1, length_ratio * source_encoded_length)
+            
+            positional_attention_scores = None
+            if self.positional_attention_scorer is not None:
+                positional_attention_scores = self.positional_attention_scorer.get_loss(attention_scores_list=attention_scores_list,
+                                                                                positional_attention=position_probs,
+                                                                                num_attention_heads=self.config.config_decoder.attention_heads,
+                                                                                target_words=target_words, 
+                                                                                grad_scale=1.0) # TODO: or use lambda from self.config for scaled scores?
 
             # Return the sums and the target distributions
             # sums: (batch_size,) target_dists: (batch_size, target_seq_len, target_vocab_size)
-            return mx.sym.Group([sums, target_dists]), data_names, label_names
+            return mx.sym.Group([sums, target_dists, positional_attention_scores]), data_names, label_names
 
         symbol, _, __ = sym_gen(default_bucket_key)
         self.module = mx.mod.Module(symbol=symbol,
@@ -256,14 +275,19 @@ class Scorer:
             batch_tic = time.time()
 
             # Run the model and get the outputs
-            scores = self.model.run(batch)[0]
+            output = self.model.run(batch)
+            scores = output[0]
+            positional_attention_scores = mx.nd.zeros_like(scores)
+            if self.model.positional_attention_scoring:
+                positional_attention_scores = output[2]
+            
 
             batch_time = time.time() - batch_tic
             total_time += batch_time
 
             batch_size = len(batch.data[0])
 
-            for sentno, (source, target, score) in enumerate(zip(batch.data[0], batch.data[1], scores), 1):
+            for sentno, (source, target, score, positional_score) in enumerate(zip(batch.data[0], batch.data[1], scores, positional_attention_scores), 1):
 
                 # The last batch may be underfilled, in which case batch.pad will be set
                 if sentno > (batch_size - batch.pad):
@@ -281,12 +305,14 @@ class Scorer:
                 # Report a score of -inf for invalid sentence pairs (empty source and/or target)
                 if source[0][0] == C.PAD_ID or target[0] == C.PAD_ID:
                     score = -np.inf
+                    positional_score = -np.inf
                 else:
                     score = score.asscalar()
+                    positional_score = positional_score.asscalar()
 
                 # Output handling routines require us to make use of inference classes.
                 output_handler.handle(TranslatorInput(sentence_no, source_tokens),
-                                      TranslatorOutput(sentence_no, target_string, None, None, score),
+                                      TranslatorOutput(sentence_no, target_string, None, None, score, None, None, None, None, None, None, positional_score), 
                                       batch_time)
 
         if sentence_no != 0:

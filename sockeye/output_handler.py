@@ -132,7 +132,10 @@ class StringWithScoreOutputHandler(OutputHandler):
         :param t_output: Translator output.
         :param t_walltime: Total walltime for translation.
         """
-        self.stream.write("{:.3f}\t{}\n".format(t_output.score, t_output.translation))
+        if t_output.positional_attention_score != 0:
+            self.stream.write("{:.3f}\t{:.3f}\t{}\n".format(t_output.score, t.positional_attention_score, t_output.translation))
+        else:
+            self.stream.write("{:.3f}\t{}\n".format(t_output.score, t_output.translation))
         self.stream.flush()
 
     def reports_score(self) -> bool:
@@ -158,7 +161,10 @@ class ScoreOutputHandler(OutputHandler):
         :param t_output: Translator output.
         :param t_walltime: Total walltime for translation.
         """
-        self.stream.write("{:.3f}\n".format(t_output.score))
+        if t_output.positional_attention_score != 0:
+            self.stream.write("{:.3f}\t{:.3f}\n".format(t_output.score, t_output.positional_attention_score))
+        else:
+            self.stream.write("{:.3f}\n".format(t_output.score))
         self.stream.flush()
 
     def reports_score(self) -> bool:
@@ -184,7 +190,12 @@ class PairWithScoreOutputHandler(OutputHandler):
         :param t_output: Translator output.
         :param t_walltime: Total walltime for translation.
         """
-        self.stream.write("{:.3f}\t{}\t{}\n".format(t_output.score,
+        if t_output.positional_attention_score != 0:
+            self.stream.write("{:.3f}\t{:.3f}\t{}\t{}\n".format(t_output.score, t_output.positional_attention_score,
+                                                    C.TOKEN_SEPARATOR.join(t_input.tokens),
+                                                    t_output.translation))
+        else:
+            self.stream.write("{:.3f}\t{}\t{}\n".format(t_output.score,
                                                     C.TOKEN_SEPARATOR.join(t_input.tokens),
                                                     t_output.translation))
         self.stream.flush()

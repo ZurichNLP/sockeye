@@ -1179,8 +1179,14 @@ def add_learned_positions_args(params):
                               help="Use additional loss to encourage monotone decoder-encoder attention.")
     params.add_argument('--positional-attention-loss-lambda',
                               type=float,
-                              default=0.5,
+                              default=0.0,
                               help='Scale monotone attention loss on learned positional embeddings by lambda, CE loss will be scaled by (1-lambda). Default: %(default)s.')
+
+def add_positional_attention_scoring_args(params):
+    params = params.add_argument_group("Parameters for scoring monotonicity with attention on positional embeddings")
+    params.add_argument('--positional-attention-monotonicity-scoring',
+                              action='store_true',
+                              help="Print score for monotonicity of attention on positional embeddings.")
 
 def add_train_cli_args(params):
     add_training_io_args(params)
@@ -1202,6 +1208,7 @@ def add_score_cli_args(params):
     add_vocab_args(params)
     add_device_args(params)
     add_batch_args(params, default_batch_size=500)
+    add_positional_attention_scoring_args(params)
 
     params = params.add_argument_group("Scoring parameters")
 
