@@ -133,9 +133,9 @@ class ScoringModel(model.SockeyeModel):
         utils.check_condition(provide_label_names == label_names,
                               "incompatible provide_label: %s, names should be %s" % (provide_label_names, label_names))
         
-        self.attention_monotonicity_score=None
+        self.attention_monotonicity_scorer=None
         if self.attention_monotonicity_scoring:
-            self.attention_monotonicity_score = loss.AttentionMonotonicity(self.config)
+            self.attention_monotonicity_scorer = loss.AttentionMonotonicity(self.config)
             
         def sym_gen(seq_lens):
             """
@@ -209,11 +209,12 @@ class ScoringModel(model.SockeyeModel):
 
             # get attention monotonicity scores (batch,)
             attention_monotonicity_scores = None
-            if self.attention_monotonicity_scoring is not None:
-                attention_monotonicity_scores = self.attention_monotonicity_score.get_loss(attention_scores_list=attention_scores_list,
+            if self.attention_monotonicity_scorer is not None:
+                attention_monotonicity_scores = self.attention_monotonicity_scorer.get_loss(attention_scores_list=attention_scores_list,
                                                                             num_attention_heads=self.config.config_decoder.attention_heads,
                                                                             target_words=target_words, 
-                                                                            layers=self.attention_monotonicity_score_layers)
+                                                                            layers=self.attention_monotonicity_score_layers,
+                                                                            grad_scale=1.0)
             # Return the sums and the target distributions
             # sums: (batch_size,) target_dists: (batch_size, target_seq_len, target_vocab_size)
             return mx.sym.Group([sums, target_dists, attention_monotonicity_scores]), data_names, label_names
