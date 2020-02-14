@@ -625,7 +625,7 @@ class MonotoneAttentionModel(TrainingModel):
                                                                         num_attention_heads=self.config.config_decoder.attention_heads,
                                                                         target_words=target_words, 
                                                                         layers=self._monotone_attention_loss_layers,
-                                                                        grad_scale=self._monotone_attention_loss_lambda)] #TODO needs --no-bucketing
+                                                                        grad_scale=self._monotone_attention_loss_lambda)] 
            
             return mx.sym.Group(net_outputs + loss_attention), data_names, label_names
 

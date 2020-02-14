@@ -932,7 +932,8 @@ class TranslatorOutput:
                  'nbest_translations',
                  'nbest_tokens',
                  'nbest_attention_matrices',
-                 'nbest_scores')
+                 'nbest_scores',
+                 'attention_monotonicity_score')
 
     def __init__(self,
                  sentence_id: SentenceId,
@@ -945,7 +946,8 @@ class TranslatorOutput:
                  nbest_translations: Optional[List[str]] = None,
                  nbest_tokens: Optional[List[Tokens]] = None,
                  nbest_attention_matrices: Optional[List[np.ndarray]] = None,
-                 nbest_scores: Optional[List[float]] = None) -> None:
+                 nbest_scores: Optional[List[float]] = None,
+                 attention_monotonicity_score: Optional[float] = 0.0) -> None:
         self.sentence_id = sentence_id
         self.translation = translation
         self.tokens = tokens
@@ -957,6 +959,7 @@ class TranslatorOutput:
         self.nbest_tokens = nbest_tokens
         self.nbest_attention_matrices = nbest_attention_matrices
         self.nbest_scores = nbest_scores
+        self.attention_monotonicity_score = attention_monotonicity_score
 
     def json(self, align_threshold: float = 0.0) -> Dict:
         """

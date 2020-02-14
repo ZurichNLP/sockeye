@@ -126,7 +126,9 @@ def score(args: argparse.Namespace):
                                              brevity_penalty=inference.BrevityPenalty(weight=args.brevity_penalty_weight),
                                              softmax_temperature=args.softmax_temperature,
                                              brevity_penalty_type=args.brevity_penalty_type,
-                                             constant_length_ratio=args.brevity_penalty_constant_length_ratio)
+                                             constant_length_ratio=args.brevity_penalty_constant_length_ratio,
+                                             attention_monotonicity_scoring=args.attention_monotonicity_scoring,
+                                             attention_monotonicity_score_layers=args.attention_monotonicity_score_layers)
 
         scorer = scoring.Scorer(scoring_model, source_vocabs, target_vocab)
 

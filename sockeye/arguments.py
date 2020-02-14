@@ -1172,7 +1172,7 @@ def add_training_args(params):
                               help="Do not perform any actual training, but print statistics about the model"
                               " and mode of operation.")
 
-def add_attention_loss(params):
+def add_attention_loss_args(params):
     params = params.add_argument_group("Monotone attention loss parameters")
     params.add_argument('--attention-monotonicity-loss',
                               action='store_true',
@@ -1185,6 +1185,16 @@ def add_attention_loss(params):
                               choices=C.ATTENTION_MONOTONICITY_LOSS_LAYERS,
                               default=C.ATTENTION_MONOTONICITY_LOSS_LAYER_LAST,
                               help='Which layers are used to calculate monotone attention loss. Default: %(default)s.')
+    
+def add_attention_scoring_args(params):
+    params = params.add_argument_group("Parameters for scoring with monotone attention loss")
+    params.add_argument('--attention-monotonicity-scoring',
+                              action='store_true',
+                              help="Print monotone attention score.")
+    params.add_argument('--attention-monotonicity-score-layers',
+                              choices=C.ATTENTION_MONOTONICITY_LOSS_LAYERS,
+                              default=C.ATTENTION_MONOTONICITY_LOSS_LAYER_LAST,
+                              help='Which layers are used to calculate monotone attention score. Default: %(default)s.')
 
 def add_train_cli_args(params):
     add_training_io_args(params)
@@ -1192,7 +1202,7 @@ def add_train_cli_args(params):
     add_training_args(params)
     add_device_args(params)
     add_logging_args(params)
-    add_attention_loss(params)
+    add_attention_loss_args(params)
 
 
 def add_translate_cli_args(params):
@@ -1206,6 +1216,7 @@ def add_score_cli_args(params):
     add_vocab_args(params)
     add_device_args(params)
     add_batch_args(params, default_batch_size=500)
+    add_attention_scoring_args(params)
 
     params = params.add_argument_group("Scoring parameters")
 

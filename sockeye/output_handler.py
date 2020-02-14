@@ -132,7 +132,10 @@ class StringWithScoreOutputHandler(OutputHandler):
         :param t_output: Translator output.
         :param t_walltime: Total walltime for translation.
         """
-        self.stream.write("{:.3f}\t{}\n".format(t_output.score, t_output.translation))
+        if t_output.attention_monotonicity_score != 0:
+            self.stream.write("{:.3f}\t{:.3f}\t{}\n".format(t_output.score, t.attention_monotonicity_score, t_output.translation))
+        else:
+            self.stream.write("{:.3f}\t{}\n".format(t_output.score, t_output.translation))
         self.stream.flush()
 
     def reports_score(self) -> bool:
@@ -158,7 +161,10 @@ class ScoreOutputHandler(OutputHandler):
         :param t_output: Translator output.
         :param t_walltime: Total walltime for translation.
         """
-        self.stream.write("{:.3f}\n".format(t_output.score))
+        if t_output.attention_monotonicity_score != 0:
+            self.stream.write("{:.3f}\t{:.3f}\n".format(t_output.score, t_output.attention_monotonicity_score))
+        else:
+            self.stream.write("{:.3f}\n".format(t_output.score))
         self.stream.flush()
 
     def reports_score(self) -> bool:
