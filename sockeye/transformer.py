@@ -117,8 +117,11 @@ class TransformerEncoderBlock(mx.gluon.HybridBlock):
         data = self.post_self_attention(data_self_att, data)
         
         if self.positional_embedding_layer is not None:
-            data, test = self.positional_embedding_layer(data, pos_embed, source, source_lengths)
-            return data, test
+            data, position_probs = self.positional_embedding_layer(data, pos_embed, source, source_lengths)
+            # feed-forward
+            data_ff = self.ff(self.pre_ff(data, None))
+            data = self.post_ff(data_ff, data)
+            return data, position_probs
         # feed-forward
         data_ff = self.ff(self.pre_ff(data, None))
         data = self.post_ff(data_ff, data)

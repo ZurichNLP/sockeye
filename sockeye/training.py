@@ -190,14 +190,12 @@ class TrainingModel(model.SockeyeModel):
                                     mx.sym.BlockGrad(predicted_length_ratio, name=C.LENRATIO_NAME),
                                     mx.sym.BlockGrad(length_ratio, name=C.LENRATIO_LABEL_NAME)])
             
-            
             loss_attention = [self.multilingual_positional_loss.get_loss(attention_scores_list=attention_scores_list,
                                                                                 positional_attention=position_probs,
                                                                                 num_attention_heads=self.config.config_decoder.attention_heads,
                                                                                 target_words=target_words, 
                                                                                 grad_scale=self._positional_attention_loss_lambda)]
               
-                                          
             return mx.sym.Group(net_outputs + loss_attention), data_names, label_names
 
         # Fix model parameters as needed for different training options.
@@ -929,7 +927,6 @@ class EarlyStoppingTrainer:
         # Forward & Backward
         ####################
         model.run_forward_backward(batch, metric_train)
-       
         # If using an extended optimizer, provide extra state information about the current batch
         optimizer = model.optimizer
         if metric_loss is not None and isinstance(optimizer, SockeyeOptimizer):

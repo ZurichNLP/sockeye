@@ -1049,7 +1049,8 @@ class TransformerEncoder(Encoder, mx.gluon.HybridBlock):
                 for i in range(config.num_layers-1):
                     self.layers.add(transformer.TransformerEncoderBlock(config, prefix="%d_" % i))
                 # add positional embedding layer to last TransformerEncoderBlock
-                self.layers.add(transformer.TransformerEncoderBlock(config, prefix="%d_" % config.num_layers, has_positional_embedding_layer=True))
+                last = int(config.num_layers)-1
+                self.layers.add(transformer.TransformerEncoderBlock(config, prefix="%d_" % last, has_positional_embedding_layer=True))
             else:
                 for i in range(config.num_layers):
                     self.layers.add(transformer.TransformerEncoderBlock(config, prefix="%d_" % i))
