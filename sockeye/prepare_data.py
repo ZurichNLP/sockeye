@@ -88,6 +88,8 @@ def prepare_data(args: argparse.Namespace):
                          bucket_width=bucket_width,
                          samples_per_shard=samples_per_shard,
                          min_num_shards=minimum_num_shards,
+                         instance_weights_fname=args.instance_weights_file,
+                         instance_weighting=args.instance_weighting,
                          output_prefix=output_folder)
 
 

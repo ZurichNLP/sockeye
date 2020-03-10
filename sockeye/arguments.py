@@ -389,6 +389,14 @@ def add_training_data_args(params, required=False):
                         required=required,
                         type=regular_file(),
                         help='Target side of parallel training data.')
+    params.add_argument(C.TRAINING_ARG_INSTANCE_WEIGHTS_FILE,
+                        required=False,
+                        type=regular_file(),
+                        default=None,
+                        help='Weights for training examples. One float per sentence pair, one per line.')
+    params.add_argument(C.TRAINING_ARG_INSTANCE_WEIGHTING,
+                        action="store_true",
+                        help='Use instance weighting for training.')
 
 
 def add_validation_data_params(params):

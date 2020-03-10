@@ -6,6 +6,7 @@
 /docs/generated/*
 /docs/_build
 /runpy
+.DS_Store
 /build
 .coverage*
 .idea**
