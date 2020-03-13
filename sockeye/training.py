@@ -104,7 +104,7 @@ class TrainingModel(model.SockeyeModel):
         labels = mx.sym.reshape(data=mx.sym.Variable(C.TARGET_LABEL_NAME), shape=(-1,))
 
         if self.instance_weighting:
-            weights = mx.sym.Variable(C.INSTANCE_WEIGHT_NAME)
+            weights = mx.sym.reshape(data=mx.sym.Variable(C.INSTANCE_WEIGHT_NAME), shape=(-1,))
         else:
             weights = None
 

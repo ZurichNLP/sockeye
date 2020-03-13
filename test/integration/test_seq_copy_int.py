@@ -177,6 +177,30 @@ ENCODER_DECODER_SETTINGS = [
      "--beam-size 2"
      " --brevity-penalty-type constant --brevity-penalty-weight 2.0 --brevity-penalty-constant-length-ratio 1.5",
      False, False),
+    # Full transformer with weighted cross entropy loss, WITHOUT instance weighting
+    ("--encoder transformer --decoder transformer"
+     " --num-layers 2 --transformer-attention-heads 2 --transformer-model-size 8 --num-embed 8"
+     " --transformer-feed-forward-num-hidden 16"
+     " --transformer-dropout-prepost 0.1 --transformer-preprocess n --transformer-postprocess dr"
+     " --weight-tying --weight-tying-type src_trg_softmax"
+     " --weight-init-scale=3.0 --weight-init-xavier-factor-type=avg --embed-weight-init=normal"
+     " --batch-size 2 --max-updates 2 --batch-type sentence --decode-and-evaluate 0"
+     " --checkpoint-interval 2 --optimizer adam --initial-learning-rate 0.01"
+     " --loss weighted-cross-entropy",
+     "--beam-size 2 --nbest-size 2",
+     False, False),
+    # Full transformer with weighted cross entropy loss, with instance weighting
+    ("--encoder transformer --decoder transformer"
+     " --num-layers 2 --transformer-attention-heads 2 --transformer-model-size 8 --num-embed 8"
+     " --transformer-feed-forward-num-hidden 16"
+     " --transformer-dropout-prepost 0.1 --transformer-preprocess n --transformer-postprocess dr"
+     " --weight-tying --weight-tying-type src_trg_softmax"
+     " --weight-init-scale=3.0 --weight-init-xavier-factor-type=avg --embed-weight-init=normal"
+     " --batch-size 2 --max-updates 2 --batch-type sentence --decode-and-evaluate 0"
+     " --checkpoint-interval 2 --optimizer adam --initial-learning-rate 0.01"
+     " --loss weighted-cross-entropy --instance-weighting",
+     "--beam-size 2 --nbest-size 2",
+     False, False),
     ]
 
 

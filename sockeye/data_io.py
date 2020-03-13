@@ -644,8 +644,8 @@ class RawThreewayDatasetLoader:
                        for (source_len, target_len), num_samples in zip(self.buckets, num_samples_per_bucket)]
         data_label = [np.full((num_samples, target_len), self.pad_id, dtype=self.dtype)
                       for (source_len, target_len), num_samples in zip(self.buckets, num_samples_per_bucket)]
-        data_weight = [np.full((num_samples,), self.default_weight_float, dtype=self.dtype)
-                        for _, num_samples in zip(self.buckets, num_samples_per_bucket)]
+        data_weight = [np.full((num_samples, target_len), self.default_weight_float, dtype=self.dtype)
+                        for (source_len, target_len), num_samples in zip(self.buckets, num_samples_per_bucket)]
 
         bucket_sample_index = [0 for _ in self.buckets]
 
@@ -685,7 +685,7 @@ class RawThreewayDatasetLoader:
             # we can try again to compute the label sequence on the fly in next().
             data_label[buck_index][sample_index, :target_len] = target[1:] + [self.eos_id]
 
-            data_weight[buck_index][sample_index] = weight
+            data_weight[buck_index][sample_index] = [weight] * buck[1]
 
             bucket_sample_index[buck_index] += 1
 
@@ -873,7 +873,7 @@ def get_data_statistics(source_readers: Optional[Sequence[Iterable]],
     return data_stats_accumulator.statistics
 
 
-def get_validation_data_iter(data_loader: RawParallelDatasetLoader,
+def get_validation_data_iter(data_loader: Union[RawParallelDatasetLoader,RawThreewayDatasetLoader],
                              validation_sources: List[str],
                              validation_target: str,
                              buckets: List[Tuple[int, int]],
@@ -882,7 +882,8 @@ def get_validation_data_iter(data_loader: RawParallelDatasetLoader,
                              target_vocab: vocab.Vocab,
                              max_seq_len_source: int,
                              max_seq_len_target: int,
-                             batch_size: int) -> 'ParallelSampleIter':
+                             batch_size: int,
+                             instance_weighting: bool = False) -> 'Union[ParallelSampleIter,ThreewaySampleIter]':
     """
     Returns a ParallelSampleIter for the validation data.
     """
@@ -910,14 +911,28 @@ def get_validation_data_iter(data_loader: RawParallelDatasetLoader,
 
     validation_data_statistics.log(bucket_batch_sizes)
 
-    validation_data = data_loader.load(validation_sources_sentences, validation_target_sentences,
-                                       validation_data_statistics.num_sents_per_bucket).fill_up(bucket_batch_sizes)
+    if instance_weighting:
+        # insert dummy weights for validation data, for unweighted loss
+        instance_weights_reader = DummyFloatReader(1.0)
 
-    return ParallelSampleIter(data=validation_data,
-                              buckets=buckets,
-                              batch_size=batch_size,
-                              bucket_batch_sizes=bucket_batch_sizes,
-                              num_factors=len(validation_sources))
+        validation_data = data_loader.load(validation_sources_sentences, validation_target_sentences,
+                                           validation_data_statistics.num_sents_per_bucket,
+                                           instance_weights_reader).fill_up(bucket_batch_sizes)
+
+        return ThreewaySampleIter(data=validation_data,
+                                  buckets=buckets,
+                                  batch_size=batch_size,
+                                  bucket_batch_sizes=bucket_batch_sizes,
+                                  num_factors=len(validation_sources))
+    else:
+        validation_data = data_loader.load(validation_sources_sentences, validation_target_sentences,
+                                           validation_data_statistics.num_sents_per_bucket).fill_up(bucket_batch_sizes)
+
+        return ParallelSampleIter(data=validation_data,
+                                  buckets=buckets,
+                                  batch_size=batch_size,
+                                  bucket_batch_sizes=bucket_batch_sizes,
+                                  num_factors=len(validation_sources))
 
 
 def get_prepared_data_iters(prepared_data_dir: str,
@@ -992,6 +1007,9 @@ def get_prepared_data_iters(prepared_data_dir: str,
                                                bucket_batch_sizes,
                                                num_factors=len(data_info.sources),
                                                permute=permute)
+        data_loader = RawThreewayDatasetLoader(buckets=buckets,
+                                               eos_id=target_vocab[C.EOS_SYMBOL],
+                                               pad_id=C.PAD_ID)
     else:
         train_iter = ShardedParallelSampleIter(shard_fnames,
                                                buckets,
@@ -1000,9 +1018,9 @@ def get_prepared_data_iters(prepared_data_dir: str,
                                                num_factors=len(data_info.sources),
                                                permute=permute)
 
-    data_loader = RawParallelDatasetLoader(buckets=buckets,
-                                           eos_id=target_vocab[C.EOS_SYMBOL],
-                                           pad_id=C.PAD_ID)
+        data_loader = RawParallelDatasetLoader(buckets=buckets,
+                                               eos_id=target_vocab[C.EOS_SYMBOL],
+                                               pad_id=C.PAD_ID)
 
     validation_iter = get_validation_data_iter(data_loader=data_loader,
                                                validation_sources=validation_sources,
@@ -1013,7 +1031,8 @@ def get_prepared_data_iters(prepared_data_dir: str,
                                                target_vocab=target_vocab,
                                                max_seq_len_source=max_seq_len_source,
                                                max_seq_len_target=max_seq_len_target,
-                                               batch_size=batch_size)
+                                               batch_size=batch_size,
+                                               instance_weighting=instance_weighting)
 
     return train_iter, validation_iter, config_data, source_vocabs, target_vocab
 
@@ -1101,22 +1120,22 @@ def get_training_data_iters(sources: List[str],
 
     # Pass 3: Load the data into memory and return the iterator.
 
-    data_loader_parallel = RawParallelDatasetLoader(buckets=buckets,
-                                                    eos_id=target_vocab[C.EOS_SYMBOL],
-                                                    pad_id=C.PAD_ID)
-
     if instance_weighting:
         instance_weights_reader = FloatReader(instance_weights_path)
 
-        data_loader_threeway = RawThreewayDatasetLoader(buckets=buckets,
+        data_loader = RawThreewayDatasetLoader(buckets=buckets,
                                                eos_id=target_vocab[C.EOS_SYMBOL],
                                                pad_id=C.PAD_ID)
 
-        training_data = data_loader_threeway.load(sources_sentences, target_sentences,
+        training_data = data_loader.load(sources_sentences, target_sentences,
                                          data_statistics.num_sents_per_bucket,
                                          instance_weights_reader).fill_up(bucket_batch_sizes)
     else:
-        training_data = data_loader_parallel.load(sources_sentences, target_sentences,
+        data_loader = RawParallelDatasetLoader(buckets=buckets,
+                                                        eos_id=target_vocab[C.EOS_SYMBOL],
+                                                        pad_id=C.PAD_ID)
+
+        training_data = data_loader.load(sources_sentences, target_sentences,
                                          data_statistics.num_sents_per_bucket).fill_up(bucket_batch_sizes)
 
     data_info = DataInfo(sources=sources,
@@ -1149,7 +1168,7 @@ def get_training_data_iters(sources: List[str],
                                         num_factors=len(sources),
                                         permute=True)
 
-    validation_iter = get_validation_data_iter(data_loader=data_loader_parallel,
+    validation_iter = get_validation_data_iter(data_loader=data_loader,
                                                validation_sources=validation_sources,
                                                validation_target=validation_target,
                                                buckets=buckets,
@@ -1158,7 +1177,8 @@ def get_training_data_iters(sources: List[str],
                                                target_vocab=target_vocab,
                                                max_seq_len_source=max_seq_len_source,
                                                max_seq_len_target=max_seq_len_target,
-                                               batch_size=batch_size)
+                                               batch_size=batch_size,
+                                               instance_weighting=instance_weighting)
 
     return train_iter, validation_iter, config_data, data_info
 
@@ -1483,6 +1503,19 @@ class FloatReader(Iterable):
         for tokens in read_content(self.path, self.limit):
             num = float(tokens[0])
             yield num
+
+class DummyFloatReader(Iterable):
+    """
+        Returns a constant float for every iteration.
+        """
+
+    def __init__(self,
+                 constant_value: float = 1.0) -> None:
+        self.constant_value = constant_value
+
+    def __iter__(self):
+        while True:
+            yield self.constant_value
 
 
 def create_sequence_readers(sources: List[str], target: str,

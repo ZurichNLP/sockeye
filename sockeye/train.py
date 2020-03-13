@@ -104,6 +104,14 @@ def check_arg_compatibility(args: argparse.Namespace):
         check_condition(args.decoder == C.RNN_NAME,
                         "The attention-based copying mechanism currently supports RNN decoders only.")
 
+    if args.instance_weighting:
+        check_condition(args.instance_weights_file is not None,
+                        "If %s is used, %s must be specified." % (C.TRAINING_ARG_INSTANCE_WEIGHTING,
+                                                                  C.TRAINING_ARG_INSTANCE_WEIGHTS_FILE))
+        check_condition(args.loss == C.WEIGHTED_CROSS_ENTROPY,
+                        "If %s is used, loss type must be %s" % (C.TRAINING_ARG_INSTANCE_WEIGHTING,
+                                                                 C.WEIGHTED_CROSS_ENTROPY))
+
 
 def check_resume(args: argparse.Namespace, output_folder: str) -> bool:
     """
@@ -346,7 +354,8 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
             max_seq_len_target=max_seq_len_target,
             bucketing=not args.no_bucketing,
             bucket_width=args.bucket_width,
-            instance_weights_path=args.instance_weights_file)
+            instance_weights_path=args.instance_weights_file,
+            instance_weighting=args.instance_weighting)
 
         data_info_fname = os.path.join(output_folder, C.DATA_INFO)
         logger.info("Writing data config to '%s'", data_info_fname)
@@ -691,7 +700,8 @@ def create_model_config(args: argparse.Namespace,
     config_loss = loss.LossConfig(name=args.loss,
                                   vocab_size=target_vocab_size,
                                   normalization_type=args.loss_normalization_type,
-                                  label_smoothing=args.label_smoothing)
+                                  label_smoothing=args.label_smoothing,
+                                  use_instance_weight=args.instance_weighting)
 
     if args.length_task is not None:
         config_length_task = layers.LengthRatioConfig(num_layers=args.length_task_layers, weight=args.length_task_weight)
@@ -746,7 +756,8 @@ def create_training_model(config: model.ModelConfig,
                                             gradient_compression_params=gradient_compression_params(args),
                                             gradient_accumulation=args.update_interval > 1,
                                             fixed_param_names=args.fixed_param_names,
-                                            fixed_param_strategy=args.fixed_param_strategy)
+                                            fixed_param_strategy=args.fixed_param_strategy,
+                                            instance_weighting=args.instance_weighting)
 
     return training_model
 

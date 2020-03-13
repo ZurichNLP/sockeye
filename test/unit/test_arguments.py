@@ -38,7 +38,8 @@ from itertools import zip_longest
           source_vocab=None, target_vocab=None, source_factor_vocabs=[], shared_vocab=False, num_words=(0, 0),
           word_min_count=(1, 1), pad_vocab_to_multiple_of=None,
           no_bucketing=False, bucket_width=10, max_seq_len=(99, 99),
-          monitor_pattern=None, monitor_stat_func='mx_default')),
+          monitor_pattern=None, monitor_stat_func='mx_default',
+          instance_weighting=False, instance_weights_file=None) ),
 
     # short parameters
     ('-s test_src -t test_tgt -d prep_data '
@@ -53,7 +54,8 @@ from itertools import zip_longest
           source_vocab=None, target_vocab=None, source_factor_vocabs=[], shared_vocab=False, num_words=(0, 0),
           word_min_count=(1, 1), pad_vocab_to_multiple_of=None,
           no_bucketing=False, bucket_width=10, max_seq_len=(99, 99),
-          monitor_pattern=None, monitor_stat_func='mx_default'))
+          monitor_pattern=None, monitor_stat_func='mx_default',
+          instance_weighting=False, instance_weights_file=None))
 ])
 def test_io_args(test_params, expected_params):
     _test_args(test_params, expected_params, arguments.add_training_io_args)
@@ -370,7 +372,9 @@ def test_tutorial_averaging_args(test_params, expected_params, expected_params_p
           output='train_data',
           quiet=False,
           loglevel='INFO',
-          no_logfile=False
+          no_logfile=False,
+          instance_weighting=False,
+          instance_weights_file=None
           ))
 ])
 def test_tutorial_prepare_data_cli_args(test_params, expected_params):
@@ -397,7 +401,9 @@ def test_tutorial_prepare_data_cli_args(test_params, expected_params):
           output='prepared_data',
           quiet=False,
           loglevel='INFO',
-          no_logfile=False
+          no_logfile=False,
+          instance_weighting=False,
+          instance_weights_file=None
           ))
 ])
 def test_prepare_data_cli_args(test_params, expected_params):

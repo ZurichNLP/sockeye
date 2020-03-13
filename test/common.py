@@ -18,7 +18,7 @@ import random
 import sys
 from contextlib import contextmanager
 from tempfile import TemporaryDirectory
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Tuple, Optional
 from unittest.mock import patch
 
 import mxnet as mx
@@ -107,6 +107,26 @@ def generate_digits_file(source_path: str,
             print(" ".join(digits), file=target_out)
 
 
+def generate_floats_file(output_path: str,
+                         line_count: int = 100,
+                         value_min: float = 0.0,
+                         value_max: float = 1.0,
+                         constant_value: Optional[float] = None,
+                         seed=13):
+
+    assert value_min < value_max
+
+    random_gen = random.Random(seed)
+
+    with open(output_path, 'w') as fout:
+        for _ in range(line_count):
+            if constant_value is not None:
+                random_value = constant_value
+            else:
+                random_value = random_gen.uniform(value_min, value_max)
+            print(str(random_value), file=fout)
+
+
 def generate_low_high_factors(source_path: str,
                               output_path: str):
     """
@@ -153,19 +173,23 @@ def tmp_digits_dataset(prefix: str,
         dev_target_path = os.path.join(work_dir, "dev.tgt")
         test_source_path = os.path.join(work_dir, "test.src")
         test_target_path = os.path.join(work_dir, "test.tgt")
+        train_weights_path = os.path.join(work_dir, "weights")
         generate_digits_file(train_source_path, train_target_path, train_line_count, train_max_length,
                              line_count_empty=train_line_count_empty, sort_target=sort_target, seed=seed_train)
         generate_digits_file(dev_source_path, dev_target_path, dev_line_count, dev_max_length, sort_target=sort_target,
                              seed=seed_dev)
         generate_digits_file(test_source_path, test_target_path, test_line_count, test_max_length,
                              line_count_empty=test_line_count_empty, sort_target=sort_target, seed=seed_dev)
+        generate_floats_file(train_weights_path, line_count=train_line_count, value_min=0.0,
+                             value_max=1.0, seed=seed_train)
         data = {'work_dir': work_dir,
                 'train_source': train_source_path,
                 'train_target': train_target_path,
                 'dev_source': dev_source_path,
                 'dev_target': dev_target_path,
                 'test_source': test_source_path,
-                'test_target': test_target_path}
+                'test_target': test_target_path,
+                'train_weights': train_weights_path}
 
         if with_source_factors:
             train_factor_path = train_source_path + ".factors"
@@ -183,10 +207,10 @@ def tmp_digits_dataset(prefix: str,
 
 _TRAIN_PARAMS_COMMON = "--use-cpu --max-seq-len {max_len} --source {train_source} --target {train_target}" \
                        " --validation-source {dev_source} --validation-target {dev_target} --output {model}" \
-                       " --seed {seed}"
+                       " --seed {seed} --instance-weights-file {train_weights}"
 
 _PREPARE_DATA_COMMON = " --max-seq-len {max_len} --source {train_source} --target {train_target}" \
-                       " --output {output} --pad-vocab-to-multiple-of 16"
+                       " --output {output} --instance-weights-file {train_weights} --pad-vocab-to-multiple-of 16"
 
 _TRAIN_WITH_FACTORS_COMMON = " --source-factors {source_factors}"
 _DEV_WITH_FACTORS_COMMON = " --validation-source-factors {dev_source_factors}"
@@ -271,6 +295,7 @@ def run_train_translate(train_params: str,
         params = "{} {}".format(sockeye.prepare_data.__file__,
                                 _PREPARE_DATA_COMMON.format(train_source=data['train_source'],
                                                             train_target=data['train_target'],
+                                                            train_weights=data['train_weights'],
                                                             output=data['train_prepared'],
                                                             max_len=max_seq_len))
         if 'train_source_factors' in data:
@@ -299,6 +324,7 @@ def run_train_translate(train_params: str,
         params = "{} {} {}".format(sockeye.train.__file__,
                                    _TRAIN_PARAMS_COMMON.format(train_source=data['train_source'],
                                                                train_target=data['train_target'],
+                                                               train_weights=data['train_weights'],
                                                                dev_source=data['dev_source'],
                                                                dev_target=data['dev_target'],
                                                                model=data['model'],

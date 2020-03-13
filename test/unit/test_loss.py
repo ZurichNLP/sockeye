@@ -27,7 +27,7 @@ def test_cross_entropy_loss():
 
     logits = mx.sym.Variable("logits")
     labels = mx.sym.Variable("labels")
-    sym = mx.sym.Group([loss.get_loss(logits, labels)])
+    sym = mx.sym.Group(loss.get_loss(logits, labels))
 
     assert sym.list_arguments() == ['logits', 'labels']
     assert sym.list_outputs() == [C.SOFTMAX_NAME + "_output"]
@@ -65,6 +65,217 @@ def test_cross_entropy_loss():
     assert label_grad_sum == 0
 
 
+def test_weighted_cross_entropy_loss_no_weighting():
+    config = sockeye.loss.LossConfig(name=C.WEIGHTED_CROSS_ENTROPY,
+                                     vocab_size=4,
+                                     normalization_type=C.LOSS_NORM_BATCH,
+                                     use_instance_weight=False)
+    loss = sockeye.loss.get_loss(config)
+    assert isinstance(loss, sockeye.loss.WeightedCrossEntropyLoss)
+
+    logits = mx.sym.Variable("logits")
+    labels = mx.sym.Variable("labels")
+    weights = mx.sym.Variable("weights")
+
+    sym = mx.sym.Group(loss.get_loss(logits, labels, weights))
+
+    # weights does not participate in the graph in this case
+    assert sym.list_arguments() == ['labels', 'logits']
+    assert sym.list_outputs() == [C.WEIGHTED_CROSS_ENTROPY + "_output", C.SOFTMAX_NAME + "_output"]
+
+    logits_np = mx.nd.array([[1, 2, 3, 4],
+                             [4, 2, 2, 2],
+                             [3, 3, 3, 3],
+                             [4, 4, 4, 4]])
+    labels_np = mx.nd.array([1, 0, 2, 3])  # C.PAD_ID == 0
+
+    expected_softmax = np.asarray([[0.0320586, 0.08714432, 0.23688284, 0.64391428],
+                                   [0.71123451, 0.09625512, 0.09625512, 0.09625512],
+                                   [0.25, 0.25, 0.25, 0.25],
+                                   [0.25, 0.25, 0.25, 0.25]])
+    expected_grads = np.asarray([[0.0320586, -0.91285568, 0.23688284, 0.64391428],
+                                 [0., 0., 0., 0.],
+                                 [0.25, 0.25, -0.75, 0.25],
+                                 [0.25, 0.25, 0.25, -0.75]])
+
+    # unweighted CE
+    expected_loss = np.array([2.4401896, 0., 1.3862944, 1.3862944])
+
+    _, out_shapes, _ = (sym.infer_shape(logits=logits_np.shape,
+                                        labels=labels_np.shape))
+
+    assert len(out_shapes) == 2
+    assert out_shapes[0] == (4,)
+    assert out_shapes[1] == logits_np.shape
+
+    executor = sym.simple_bind(ctx=mx.cpu(),
+                               logits=logits_np.shape,
+                               labels=labels_np.shape)
+
+    executor.arg_dict["logits"][:] = logits_np
+    executor.arg_dict["labels"][:] = labels_np
+
+    forward = executor.forward(is_train=True)
+
+    actual_loss = forward[0].asnumpy()
+    actual_softmax = forward[1].asnumpy()
+
+    assert np.isclose(actual_loss, expected_loss).all()
+    assert np.isclose(actual_softmax, expected_softmax).all()
+
+    executor.backward()
+    actual_grads = executor.grad_dict["logits"].asnumpy()
+
+    assert np.isclose(actual_grads, expected_grads).all()
+
+    label_grad_sum = executor.grad_dict["labels"].asnumpy().sum()
+    assert label_grad_sum == 0
+
+
+def test_weighted_cross_entropy_loss_with_weighting():
+    config = sockeye.loss.LossConfig(name=C.WEIGHTED_CROSS_ENTROPY,
+                                     vocab_size=4,
+                                     normalization_type=C.LOSS_NORM_BATCH,
+                                     use_instance_weight=True)
+    loss = sockeye.loss.get_loss(config)
+    assert isinstance(loss, sockeye.loss.WeightedCrossEntropyLoss)
+
+    logits = mx.sym.Variable("logits")
+    labels = mx.sym.Variable("labels")
+    weights = mx.sym.Variable("weights")
+
+    sym = mx.sym.Group(loss.get_loss(logits, labels, weights))
+
+    assert sym.list_arguments() == ['labels', 'logits', 'weights']
+    assert sym.list_outputs() == [C.WEIGHTED_CROSS_ENTROPY + "_output", C.SOFTMAX_NAME + "_output"]
+
+    logits_np = mx.nd.array([[1, 2, 3, 4],
+                             [4, 2, 2, 2],
+                             [3, 3, 3, 3],
+                             [4, 4, 4, 4]])
+    labels_np = mx.nd.array([1, 0, 2, 3])  # C.PAD_ID == 0
+
+    weights_np = mx.nd.array([1.0, 0.3, 0.0, 0.7])
+
+    expected_softmax = np.asarray([[0.0320586, 0.08714432, 0.23688284, 0.64391428],
+                                   [0.71123451, 0.09625512, 0.09625512, 0.09625512],
+                                   [0.25, 0.25, 0.25, 0.25],
+                                   [0.25, 0.25, 0.25, 0.25]])
+    expected_grads = np.asarray([[0.0320586, -0.9128557, 0.23688284, 0.6439143],
+                                 [0., 0., 0., 0.],
+                                 [0., 0., 0., 0.],
+                                 [0.175, 0.175, 0.175, -0.525]])
+
+    # weighted CE
+    expected_loss = np.array([2.4401896 , 0., 0., 0.97040608])
+
+    _, out_shapes, _ = (sym.infer_shape(logits=logits_np.shape,
+                                        labels=labels_np.shape,
+                                        weights=weights_np.shape))
+
+    assert len(out_shapes) == 2
+    assert out_shapes[0] == (4,)
+    assert out_shapes[1] == logits_np.shape
+
+    executor = sym.simple_bind(ctx=mx.cpu(),
+                               logits=logits_np.shape,
+                               labels=labels_np.shape,
+                               weights=weights_np.shape)
+
+    executor.arg_dict["logits"][:] = logits_np
+    executor.arg_dict["labels"][:] = labels_np
+    executor.arg_dict["weights"][:] = weights_np
+
+    forward = executor.forward(is_train=True)
+
+    actual_loss = forward[0].asnumpy()
+    actual_softmax = forward[1].asnumpy()
+
+    assert np.isclose(actual_loss, expected_loss).all()
+    assert np.isclose(actual_softmax, expected_softmax).all()
+
+    executor.backward()
+    actual_grads = executor.grad_dict["logits"].asnumpy()
+
+    assert np.isclose(actual_grads, expected_grads).all()
+
+    label_grad_sum = executor.grad_dict["labels"].asnumpy().sum()
+    assert label_grad_sum == 0
+
+
+def test_weighted_smoothed_cross_entropy_loss_with_weighting():
+    config = sockeye.loss.LossConfig(name=C.WEIGHTED_CROSS_ENTROPY,
+                                     vocab_size=4,
+                                     normalization_type=C.LOSS_NORM_BATCH,
+                                     use_instance_weight=True,
+                                     label_smoothing=0.5)
+
+    loss = sockeye.loss.get_loss(config)
+    assert isinstance(loss, sockeye.loss.WeightedCrossEntropyLoss)
+
+    logits = mx.sym.Variable("logits")
+    labels = mx.sym.Variable("labels")
+    weights = mx.sym.Variable("weights")
+
+    sym = mx.sym.Group(loss.get_loss(logits, labels, weights))
+
+    assert sym.list_arguments() == ['labels', 'logits', 'weights']
+    assert sym.list_outputs() == [C.WEIGHTED_CROSS_ENTROPY + "_output", C.SOFTMAX_NAME + "_output"]
+
+    logits_np = mx.nd.array([[1, 2, 3, 4],
+                             [4, 2, 2, 2],
+                             [3, 3, 3, 3],
+                             [4, 4, 4, 4]])
+    labels_np = mx.nd.array([1, 0, 2, 3])  # C.PAD_ID == 0
+
+    weights_np = mx.nd.array([1.0, 0.3, 0.0, 0.7])
+
+    expected_softmax = np.asarray([[0.0320586, 0.08714432, 0.23688284, 0.64391428],
+                                   [0.71123451, 0.09625512, 0.09625512, 0.09625512],
+                                   [0.25, 0.25, 0.25, 0.25],
+                                   [0.25, 0.25, 0.25, 0.25]])
+    expected_grads = np.asarray([[-0.13460806, -0.41285568, 0.07021617, 0.4772476],
+                                 [-0., -0., -0., -0.],
+                                 [-0., -0., -0., -0.],
+                                 [0.05833333, 0.05833333, 0.05833333, -0.175]])
+
+    # smoothed, weighted CE
+    expected_loss = np.array([2.1068563, 0., 0., 0.97040606])
+
+    _, out_shapes, _ = (sym.infer_shape(logits=logits_np.shape,
+                                        labels=labels_np.shape,
+                                        weights=weights_np.shape))
+
+    assert len(out_shapes) == 2
+    assert out_shapes[0] == (4,)
+    assert out_shapes[1] == logits_np.shape
+
+    executor = sym.simple_bind(ctx=mx.cpu(),
+                               logits=logits_np.shape,
+                               labels=labels_np.shape,
+                               weights=weights_np.shape)
+
+    executor.arg_dict["logits"][:] = logits_np
+    executor.arg_dict["labels"][:] = labels_np
+    executor.arg_dict["weights"][:] = weights_np
+
+    forward = executor.forward(is_train=True)
+
+    actual_loss = forward[0].asnumpy()
+    actual_softmax = forward[1].asnumpy()
+
+    assert np.isclose(actual_loss, expected_loss).all()
+    assert np.isclose(actual_softmax, expected_softmax).all()
+
+    executor.backward()
+    actual_grads = executor.grad_dict["logits"].asnumpy()
+
+    assert np.isclose(actual_grads, expected_grads).all()
+
+    label_grad_sum = executor.grad_dict["labels"].asnumpy().sum()
+    assert label_grad_sum == 0
+
+
 def test_smoothed_cross_entropy_loss():
     config = sockeye.loss.LossConfig(name=C.CROSS_ENTROPY,
                                      vocab_size=4,
@@ -75,7 +286,7 @@ def test_smoothed_cross_entropy_loss():
 
     logits = mx.sym.Variable("logits")
     labels = mx.sym.Variable("labels")
-    sym = mx.sym.Group([loss.get_loss(logits, labels)])
+    sym = mx.sym.Group(loss.get_loss(logits, labels))
 
     assert sym.list_arguments() == ['logits', 'labels']
     assert sym.list_outputs() == [C.SOFTMAX_NAME + "_output"]

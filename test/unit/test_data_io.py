@@ -484,7 +484,9 @@ def test_get_training_data_iters():
             max_seq_len_source=train_max_length,
             max_seq_len_target=train_max_length,
             bucketing=True,
-            bucket_width=10)
+            bucket_width=10,
+            instance_weights_path=None,
+            instance_weighting=False)
         assert isinstance(train_iter, data_io.ParallelSampleIter)
         assert isinstance(val_iter, data_io.ParallelSampleIter)
         assert isinstance(config_data, data_io.DataConfig)

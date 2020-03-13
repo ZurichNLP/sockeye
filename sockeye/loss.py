@@ -193,8 +193,8 @@ class WeightedCrossEntropyLoss(Loss):
     def __init__(self, loss_config: LossConfig,
                  output_names: List[str], label_names: List[str],
                  ignore_label: int=C.PAD_ID, name: str=C.WEIGHTED_CROSS_ENTROPY) -> None:
-        logger.info("Loss: WeightedCrossEntropy(normalization_type=%s, label_smoothing=%s)",
-                    loss_config.normalization_type, loss_config.label_smoothing)
+        logger.info("Loss: WeightedCrossEntropy(normalization_type=%s, label_smoothing=%s, use_instance_weight=%s)",
+                    loss_config.normalization_type, loss_config.label_smoothing, loss_config.use_instance_weight)
         super().__init__(loss_config=loss_config, output_names=output_names, label_names=label_names)
         self.ignore_label = ignore_label
         self.name = name
@@ -207,8 +207,8 @@ class WeightedCrossEntropyLoss(Loss):
         Returns loss symbol given logits and integer-coded labels.
 
         :param logits: Shape: (batch_size * target_seq_len, target_vocab_size).
-        :param labels: Shape: (batch_size * target_seq_len,).
-        :param weights: Shape: (batch size)
+        :param labels: Shape: (batch_size * target_seq_len).
+        :param weights: Shape: (batch size * target_seq_len)
         :return: List of loss symbols.
         """
         if self.loss_config.normalization_type == C.LOSS_NORM_VALID:
@@ -235,9 +235,13 @@ class WeightedCrossEntropyLoss(Loss):
             # zero out self.ignore_label
             smoothed_labels = mx.sym.where(labels != self.ignore_label, smoothed_labels, mx.sym.zeros_like(smoothed_labels), name="step_where")
 
+            # ce: (batch_size * target_seq_len, target_vocab_size)
             ce = smoothed_labels * - logprobs
+
+            # ce: (batch_size * target_seq_len)
             ce = mx.sym.sum(data=ce, axis=1)
         else:
+            # ce: (batch_size * target_seq_len)
             ce = - mx.sym.pick(logprobs, labels, name="step_pick")
 
             # zero out self.ignore_label

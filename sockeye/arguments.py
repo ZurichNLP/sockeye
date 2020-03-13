@@ -859,7 +859,7 @@ def add_training_args(params):
 
     train_params.add_argument('--loss',
                               default=C.CROSS_ENTROPY,
-                              choices=[C.CROSS_ENTROPY],
+                              choices=[C.CROSS_ENTROPY, C.WEIGHTED_CROSS_ENTROPY],
                               help='Loss to optimize. Default: %(default)s.')
     train_params.add_argument('--label-smoothing',
                               default=0.1,
