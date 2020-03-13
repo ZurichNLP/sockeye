@@ -60,6 +60,7 @@ class TrainingModel(model.SockeyeModel):
     :param gradient_accumulation: Whether to accumulate gradients over batches. Default: False.
     :param fixed_param_names: Optional list of params to fix during training (i.e. their values will not be trained).
     :param fixed_param_strategy: Optional string indicating a named strategy for fixing parameters.
+    :param instance_weighting: Whether to weight each batch item by multiplying with a float provided by the data iterator.
     """
 
     def __init__(self,
@@ -73,12 +74,14 @@ class TrainingModel(model.SockeyeModel):
                  gradient_compression_params: Optional[Dict[str, Any]] = None,
                  gradient_accumulation: bool = False,
                  fixed_param_names: Optional[List[str]] = None,
-                 fixed_param_strategy: Optional[str] = None) -> None:
+                 fixed_param_strategy: Optional[str] = None,
+                 instance_weighting: bool = False) -> None:
         super().__init__(config)
         self.context = context
         self.output_dir = output_dir
         self.fixed_param_names = fixed_param_names
         self.fixed_param_strategy = fixed_param_strategy
+        self.instance_weighting = instance_weighting
         self._bucketing = bucketing
         self._gradient_compression_params = gradient_compression_params
         self._gradient_accumulation = gradient_accumulation
@@ -100,8 +103,14 @@ class TrainingModel(model.SockeyeModel):
         target_length = utils.compute_lengths(target)
         labels = mx.sym.reshape(data=mx.sym.Variable(C.TARGET_LABEL_NAME), shape=(-1,))
 
+        if self.instance_weighting:
+            weights = mx.sym.Variable(C.INSTANCE_WEIGHT_NAME)
+        else:
+            weights = None
+
         self.model_loss = loss.get_loss(self.config.config_loss)
         logger.info("Using model loss: %s", self.model_loss)
+
         if self.config.config_length_task_loss is not None:
             self.length_task_loss = loss.get_length_task_loss(self.config.config_length_task_loss)
             logger.info("Using length task loss: %s", self.length_task_loss)
@@ -109,6 +118,10 @@ class TrainingModel(model.SockeyeModel):
             self.length_task_loss = None
 
         data_names = [C.SOURCE_NAME, C.TARGET_NAME]
+
+        if self.instance_weighting:
+            data_names.append(C.INSTANCE_WEIGHT_NAME)
+
         label_names = [C.TARGET_LABEL_NAME]
 
         # length_ratio: (batch_size, ). Will be pruned if not used
@@ -166,21 +179,26 @@ class TrainingModel(model.SockeyeModel):
                 # Concatenate the output vocabulary logits to the pointer scores
                 logits = mx.sym.concat(logits, pointer_scores, dim=1)
             
-            # 1) standard cross-entropy loss
-            net_outputs = [self.model_loss.get_loss(logits, labels)]
+            # 1) standard or weighted cross-entropy loss
+            net_outputs = self.model_loss.get_loss(logits, labels, weights)
+
             # 2) length task losses
             if self.length_task_loss is not None:
                 # predicted_length_ratios: (batch_size, 1)
                 predicted_length_ratio = self.length_ratio(source_encoded, source_encoded_length)
+
                 if isinstance(self.length_task_loss, loss.MSELoss):
-                    loss_symbol = self.length_task_loss.get_loss(predicted_length_ratio, length_ratio)
+                    length_loss_outputs = self.length_task_loss.get_loss(predicted_length_ratio, length_ratio)
                 elif isinstance(self.length_task_loss, loss.PoissonLoss):
                     # convert ratios to (expected) length estimations for the Poisson loss
                     predicted_reference_length = predicted_length_ratio * source_encoded_length.reshape((-1, 1))
-                    loss_symbol = self.length_task_loss.get_loss(predicted_reference_length, target_length)
+                    length_loss_outputs = self.length_task_loss.get_loss(predicted_reference_length, target_length)
+                else:
+                    raise ValueError("unknown length task loss type: %s" % self.length_task_loss)
+
                 # return both the loss symbol, prediction and the computed length_ratio to be used in metrics
-                net_outputs.extend([loss_symbol,
-                                    mx.sym.BlockGrad(predicted_length_ratio, name=C.LENRATIO_NAME),
+                net_outputs.extend(length_loss_outputs)
+                net_outputs.extend([mx.sym.BlockGrad(predicted_length_ratio, name=C.LENRATIO_NAME),
                                     mx.sym.BlockGrad(length_ratio, name=C.LENRATIO_LABEL_NAME)])
 
             return mx.sym.Group(net_outputs), data_names, label_names

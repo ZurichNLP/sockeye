@@ -36,7 +36,7 @@ class LossConfig(config.Config):
     :param normalization_type: How to normalize the loss.
     :param label_smoothing: Optional smoothing constant for label smoothing.
     :param link: Link function.
-    :param weight: Loss weight.
+    :param use_instance_weight: Use instance weights (if given) to weight loss per batch item.
     """
 
     def __init__(self,
@@ -45,7 +45,8 @@ class LossConfig(config.Config):
                  normalization_type: Optional[str] = None,
                  label_smoothing: float = 0.0,
                  length_task_link: Optional[str] = None,
-                 length_task_weight: float = 1.0) -> None:
+                 length_task_weight: float = 1.0,
+                 use_instance_weight: bool = True) -> None:
         super().__init__()
         self.name = name
         self.vocab_size = vocab_size
@@ -53,6 +54,7 @@ class LossConfig(config.Config):
         self.label_smoothing = label_smoothing
         self.length_task_link = length_task_link
         self.length_task_weight = length_task_weight
+        self.use_instance_weight = use_instance_weight
 
 
 def get_loss(config: LossConfig) -> 'Loss':
@@ -66,6 +68,10 @@ def get_loss(config: LossConfig) -> 'Loss':
         return CrossEntropyLoss(config,
                                 output_names=[C.SOFTMAX_OUTPUT_NAME],
                                 label_names=[C.TARGET_LABEL_NAME])
+    elif config.name == C.WEIGHTED_CROSS_ENTROPY:
+        return WeightedCrossEntropyLoss(config,
+                                        output_names=[C.SOFTMAX_OUTPUT_NAME],
+                                        label_names=[C.TARGET_LABEL_NAME])
     else:
         raise ValueError("unknown loss name: %s" % config.name)
 
@@ -105,12 +111,16 @@ class Loss(ABC):
         self.label_names = label_names
         self.loss_config = loss_config
 
-    def get_loss(self, logits: mx.sym.Symbol, labels: mx.sym.Symbol) -> mx.sym.Symbol:
+    def get_loss(self,
+                 logits: mx.sym.Symbol,
+                 labels: mx.sym.Symbol,
+                 weights: Optional[mx.sym.Symbol] = None) -> List[mx.sym.Symbol]:
         """
         Returns loss and softmax output symbols given logits and integer-coded labels.
 
         :param logits: Shape: (batch_size * target_seq_len, target_vocab_size).
         :param labels: Shape: (batch_size * target_seq_len,).
+        :param weights: Shape: (batch_size)
         :return: Loss symbol.
         """
         raise NotImplementedError()
@@ -142,7 +152,10 @@ class CrossEntropyLoss(Loss):
         self.ignore_label = ignore_label
         self.name = name
 
-    def get_loss(self, logits: mx.sym.Symbol, labels: mx.sym.Symbol) -> mx.sym.Symbol:
+    def get_loss(self,
+                 logits: mx.sym.Symbol,
+                 labels: mx.sym.Symbol,
+                 weights: Optional[mx.sym.Symbol] = None) -> List[mx.sym.Symbol]:
         """
         Returns loss symbol given logits and integer-coded labels.
 
@@ -156,16 +169,94 @@ class CrossEntropyLoss(Loss):
             normalization = "null"
         else:
             raise ValueError("Unknown loss normalization type: %s" % self.loss_config.normalization_type)
-        return mx.sym.SoftmaxOutput(data=logits,
-                                    label=labels,
-                                    ignore_label=self.ignore_label,
-                                    use_ignore=True,
-                                    normalization=normalization,
-                                    smooth_alpha=self.loss_config.label_smoothing,
-                                    name=self.name)
+
+        loss_value = mx.sym.SoftmaxOutput(data=logits,
+                                          label=labels,
+                                          ignore_label=self.ignore_label,
+                                          use_ignore=True,
+                                          normalization=normalization,
+                                          smooth_alpha=self.loss_config.label_smoothing,
+                                          name=self.name)
+
+        return [loss_value]
 
     def create_metric(self) -> "CrossEntropyMetric":
         return CrossEntropyMetric(self.loss_config)
+
+
+class WeightedCrossEntropyLoss(Loss):
+    """
+    Computes a weighted variant of the cross-entropy loss. Assumes 1 weight for each item in a batch.
+
+    :param loss_config: Loss configuration.
+    """
+    def __init__(self, loss_config: LossConfig,
+                 output_names: List[str], label_names: List[str],
+                 ignore_label: int=C.PAD_ID, name: str=C.WEIGHTED_CROSS_ENTROPY) -> None:
+        logger.info("Loss: WeightedCrossEntropy(normalization_type=%s, label_smoothing=%s)",
+                    loss_config.normalization_type, loss_config.label_smoothing)
+        super().__init__(loss_config=loss_config, output_names=output_names, label_names=label_names)
+        self.ignore_label = ignore_label
+        self.name = name
+
+    def get_loss(self,
+                 logits: mx.sym.Symbol,
+                 labels: mx.sym.Symbol,
+                 weights: Optional[mx.sym.Symbol] = None) -> List[mx.sym.Symbol]:
+        """
+        Returns loss symbol given logits and integer-coded labels.
+
+        :param logits: Shape: (batch_size * target_seq_len, target_vocab_size).
+        :param labels: Shape: (batch_size * target_seq_len,).
+        :param weights: Shape: (batch size)
+        :return: List of loss symbols.
+        """
+        if self.loss_config.normalization_type == C.LOSS_NORM_VALID:
+            normalization = "valid"
+        elif self.loss_config.normalization_type == C.LOSS_NORM_BATCH:
+            normalization = "null"
+        else:
+            raise ValueError("Unknown loss normalization type: %s" % self.loss_config.normalization_type)
+
+        # probs: (batch_size * target_seq_len, target_vocab_size)
+        probs = mx.sym.softmax(data=logits, axis=1, name="step_softmax")
+
+        # logprobs: (batch_size * target_seq_len, target_vocab_size)
+        logprobs = mx.sym.log(mx.sym.maximum(1e-10, probs), name="step_log")
+
+        if self.loss_config.label_smoothing > 0.0:
+            on_value = 1.0 - self.loss_config.label_smoothing
+            off_value = self.loss_config.label_smoothing / (self.loss_config.vocab_size - 1.0)
+            smoothed_labels = mx.sym.one_hot(indices=mx.sym.cast(data=labels, dtype='int32'),
+                                             depth=self.loss_config.vocab_size,
+                                             on_value=on_value,
+                                             off_value=off_value, name="step_one_hot")
+
+            # zero out self.ignore_label
+            smoothed_labels = mx.sym.where(labels != self.ignore_label, smoothed_labels, mx.sym.zeros_like(smoothed_labels), name="step_where")
+
+            ce = smoothed_labels * - logprobs
+            ce = mx.sym.sum(data=ce, axis=1)
+        else:
+            ce = - mx.sym.pick(logprobs, labels, name="step_pick")
+
+            # zero out self.ignore_label
+            ce = mx.sym.where(labels != self.ignore_label, ce, mx.sym.zeros_like(ce), name="step_where")
+
+        if self.loss_config.use_instance_weight:
+            ce = ce * weights
+
+        loss_value = mx.sym.MakeLoss(data=ce,
+                                     normalization=normalization,
+                                     name=self.name)
+
+        weights = mx.sym.BlockGrad(weights)
+        probs = mx.sym.BlockGrad(probs, name=C.SOFTMAX_NAME)
+
+        return [loss_value, probs]
+
+    def create_metric(self) -> "CrossEntropyMetric":
+        return CrossEntropyMetric(self.loss_config, name=C.WEIGHTED_CROSS_ENTROPY)
 
 
 class CrossEntropyMetric(EvalMetric):
@@ -202,7 +293,7 @@ class CrossEntropyMetric(EvalMetric):
         ce -= mx.nd.sum(logprob * per_class_gain, axis=-1, keepdims=False)
         return ce
 
-    def update(self, labels, preds):
+    def update(self, labels, preds, weights = None):
         for label, pred in zip(labels, preds):
             batch_size = label.shape[0]
             label = label.as_in_context(pred.context).reshape((label.size,))
@@ -221,7 +312,11 @@ class CrossEntropyMetric(EvalMetric):
             valid = (label != C.PAD_ID).astype(dtype=pred.dtype)
             ce *= valid
 
+            if self.loss_config.use_instance_weight and weights is not None:
+                ce = mx.nd.sum(ce, axis=1)
+                ce = ce * weights
             ce = mx.nd.sum(ce)
+
             if self.loss_config.normalization_type == C.LOSS_NORM_VALID:
                 num_valid = mx.nd.sum(valid)
                 ce /= num_valid
@@ -251,7 +346,10 @@ class PoissonLoss(Loss):
                          output_names=output_names, label_names=label_names)
         self.name = name
 
-    def get_loss(self, pred: mx.sym.Symbol, labels: mx.sym.Symbol) -> mx.sym.Symbol:
+    def get_loss(self,
+                 pred: mx.sym.Symbol,
+                 labels: mx.sym.Symbol,
+                 weights: Optional[mx.sym.Symbol] = None) -> List[mx.sym.Symbol]:
         """
         Returns Poisson loss and output symbol given data and expected integers as labels.
 
@@ -266,7 +364,7 @@ class PoissonLoss(Loss):
         loss_value = mx.sym.MakeLoss(data=loss_value,
                                      normalization='batch',
                                      name=self.name)
-        return loss_value
+        return [loss_value]
 
     def create_metric(self) -> 'MSEMetric':
         return LengthRatioMSEMetric(name=C.LENRATIO_MSE,
@@ -291,7 +389,10 @@ class MSELoss(Loss):
                          output_names=output_names, label_names=label_names)
         self.name = name
 
-    def get_loss(self, pred: mx.sym.Symbol, labels: mx.sym.Symbol) -> mx.sym.Symbol:
+    def get_loss(self,
+                 pred: mx.sym.Symbol,
+                 labels: mx.sym.Symbol,
+                 weights: Optional[mx.sym.Symbol] = None) -> List[mx.sym.Symbol]:
         """
         Returns MSE loss and output symbol given logits and expected integers as labels.
 
@@ -304,7 +405,7 @@ class MSELoss(Loss):
         loss_value = mx.sym.MakeLoss(data=loss_value,
                                      normalization='batch',
                                      name=self.name)
-        return loss_value
+        return [loss_value]
 
     def create_metric(self) -> 'MSEMetric':
         return LengthRatioMSEMetric(name=C.LENRATIO_MSE,
