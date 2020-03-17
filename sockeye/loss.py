@@ -254,7 +254,6 @@ class WeightedCrossEntropyLoss(Loss):
                                      normalization=normalization,
                                      name=self.name)
 
-        weights = mx.sym.BlockGrad(weights)
         probs = mx.sym.BlockGrad(probs, name=C.SOFTMAX_NAME)
 
         return [loss_value, probs]
