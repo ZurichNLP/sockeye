@@ -106,9 +106,12 @@ class EncoderModel(model.SockeyeModel):
             # source_encoded: (source_encoded_length, batch_size, encoder_depth)
             (source_encoded,
              source_encoded_length,
-             source_encoded_seq_len) = self.encoder.encode(source_embed,
+             source_encoded_seq_len,
+             pos_embed, position_probs) = self.encoder.encode(source_embed,
                                                            source_embed_length,
-                                                           source_embed_seq_len)
+                                                           source_embed_seq_len,
+                                                           get_pos_embed=True, 
+                                                           source=source)
 
 
 

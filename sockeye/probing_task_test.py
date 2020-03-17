@@ -119,16 +119,16 @@ def main():
             trained_model = joblib.load(args.regression_model)
             result = trained_model.score(encoded_sequences, labels)
             print(result)
-        #elif args.gluon_model is not None:
-            #num_outputs = len(train_morphology.label_classes[feature])
-            #net = mx.gluon.nn.Sequential()
-            #with net.name_scope():
-                #net.add(mx.gluon.nn.Dense(num_outputs))
-            #net.load_parameters(args.gluon_model, ctx=context)
+        elif args.gluon_model is not None:
+            num_outputs = len(source_vocabs[0])
+            net = mx.gluon.nn.Sequential()
+            with net.name_scope():
+                net.add(mx.gluon.nn.Dense(num_outputs))
+            net.load_parameters(args.gluon_model, ctx=context)
             
-            #test_set = mx.gluon.data.ArrayDataset(encoded_tokens, labels)
-            #test_dataloader = mx.gluon.data.DataLoader(test_set, batch_size=args.batch_size, shuffle=False)
-            #print(train_morphology.evaluate_accuracy(test_dataloader, net, context))
+            test_set = mx.gluon.data.ArrayDataset(encoded_sequences, labels)
+            test_dataloader = mx.gluon.data.DataLoader(test_set, batch_size=args.batch_size, shuffle=False)
+            print(probing_task_train.evaluate_accuracy(test_dataloader, net, context))
 
 if __name__ == '__main__':
     main()

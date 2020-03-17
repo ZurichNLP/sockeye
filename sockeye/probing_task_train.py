@@ -205,71 +205,71 @@ def train_logistic_regression(labels: np.array, encoded_sequences: np.array, max
     model.fit(encoded_sequences, labels)
     return model
     
-#def train_logistic_regression_gpu(labels: np.array, encoded_sequences: np.array, max_iter: int, context: mx.context.Context, batch_size: int, net: mx.gluon.nn.Sequential, epochs: int=10, patience: int=10):
+def train_logistic_regression_gpu(labels: np.array, encoded_sequences: np.array, max_iter: int, context: mx.context.Context, batch_size: int, net: mx.gluon.nn.Sequential, epochs: int=10, patience: int=10):
     
-    #try:
-        #encoded_sequences = mx.nd.array((encoded_sequences),context)
+    try:
+        encoded_sequences = mx.nd.array((encoded_sequences),context)
         
-    #except mx.base.MXNetError: 
-        ## weird oom error, no fix yet 
-        #logger.error("out of memory, stopped")
-        #exit(1)
+    except mx.base.MXNetError: 
+        # weird oom error, no fix yet 
+        logger.error("out of memory, stopped")
+        exit(1)
        
-    ##(sample_size, max_length_subwords, hidden_dimension) = encoded_sequences.shape
-    ##encoded_sequences = encoded_sequences.reshape(sample_size, max_length_subwords * hidden_dimension)
-    #labels = mx.nd.array((labels),context)
-    #train_set = mx.gluon.data.ArrayDataset(encoded_sequences, labels)
-    #train_dataloader = mx.gluon.data.DataLoader(train_set, batch_size=batch_size, shuffle=True)
+    #(sample_size, max_length_subwords, hidden_dimension) = encoded_sequences.shape
+    #encoded_sequences = encoded_sequences.reshape(sample_size, max_length_subwords * hidden_dimension)
+    labels = mx.nd.array((labels),context)
+    train_set = mx.gluon.data.ArrayDataset(encoded_sequences, labels)
+    train_dataloader = mx.gluon.data.DataLoader(train_set, batch_size=batch_size, shuffle=True)
     
     
-    #logger.info("training on sample size: %s", len(labels))
-    #softmax_cross_entropy = mx.gluon.loss.SoftmaxCrossEntropyLoss()
-    #trainer = mx.gluon.Trainer(net.collect_params(), 'sgd', {'learning_rate': 0.1, 'wd' : 0.0001})
+    logger.info("training on sample size: %s", len(labels))
+    softmax_cross_entropy = mx.gluon.loss.SoftmaxCrossEntropyLoss()
+    trainer = mx.gluon.Trainer(net.collect_params(), 'sgd', {'learning_rate': 0.1, 'wd' : 0.0001})
 
-    #num_not_improved =0
-    #best_acc =0.0
-    #for epoch in range(epochs):
-        #cumulative_train_loss = 0
-        #for i, (data, label) in enumerate(train_dataloader):
-            #with mx.autograd.record():
-                ## Do forward pass on a batch of training data
-                #data = data.as_in_context(context)
-                #label = label.as_in_context(context)
-                #output = net(data)
+    num_not_improved =0
+    best_acc =0.0
+    for epoch in range(epochs):
+        cumulative_train_loss = 0
+        for i, (data, label) in enumerate(train_dataloader):
+            with mx.autograd.record():
+                # Do forward pass on a batch of training data
+                data = data.as_in_context(context)
+                label = label.as_in_context(context)
+                output = net(data)
 
-                ## Calculate loss for the training data batch
-                #loss_result = softmax_cross_entropy(output, label)
+                # Calculate loss for the training data batch
+                loss_result = softmax_cross_entropy(output, label)
 
-            ## Calculate gradients
-            #loss_result.backward()
+            # Calculate gradients
+            loss_result.backward()
 
-            ## Update parameters of the network
-            #trainer.step(batch_size)
+            # Update parameters of the network
+            trainer.step(batch_size)
 
-            ## sum losses of every batch
-            #cumulative_train_loss += mx.nd.sum(loss_result).asscalar()
+            # sum losses of every batch
+            cumulative_train_loss += mx.nd.sum(loss_result).asscalar()
 
-        #avg_train_loss = cumulative_train_loss / len(encoded_sequences)
-        #acc = evaluate_accuracy(train_dataloader, net, context)
-        #logger.info("epoch {}, average training loss {}, accuracy {}".format(epoch, avg_train_loss ,acc))
-        #if acc > best_acc:
-            #best_acc = acc
-        #else:
-            #num_not_improved +=1
-        #if num_not_improved >= patience:
-            #logger.info("Accuracy has not improved for {} epochs. Stopping Training.".format(num_not_improved))
-            #return model
-    #return model
+        avg_train_loss = cumulative_train_loss / len(encoded_sequences)
+        acc = evaluate_accuracy(train_dataloader, net, context)
+        logger.info("epoch {}, average training loss {}, accuracy {}".format(epoch, avg_train_loss ,acc))
+        if acc > best_acc:
+            best_acc = acc
+        else:
+            num_not_improved +=1
+        if num_not_improved >= patience:
+            logger.info("Accuracy has not improved for {} epochs. Stopping Training.".format(num_not_improved))
+            return model
+    return model
 
-#def evaluate_accuracy(data_iterator, net, context):
-    #acc = mx.metric.Accuracy()
-    #for i, (data, label) in enumerate(data_iterator):
-        #data = data.as_in_context(context)
-        #label = label.as_in_context(context)
-        #output = net(data)
-        #predictions = mx.nd.argmax(output, axis=1)
-        #acc.update(preds=predictions, labels=label)
-    #return acc.get()[1]
+def evaluate_accuracy(data_iterator, net, context):
+    acc = mx.metric.Accuracy()
+    for i, (data, label) in enumerate(data_iterator):
+        data = data.as_in_context(context)
+        label = label.as_in_context(context)
+        output = net(data)
+        predictions = mx.nd.argmax(output, axis=1)
+        acc.update(preds=predictions, labels=label)
+    return acc.get()[1]
     
 
 
@@ -306,7 +306,7 @@ def main():
     parser.add_argument('--patience',
                         type=int, 
                         default=50,
-                        help='Stop training after n epochs that accuracy in training has not improved. Default: %(default)s.')
+                        help='Stop training after n epochs that accuracy in training has not improved.  Default: %(default)s.')
     parser.add_argument('--max-train-size',
                        type=int,
                         default=250000,
@@ -393,22 +393,20 @@ def main():
             logger.debug("{} : {}".format(src_vocab_inv[tok], freq))
             regression_config["frequencies"][src_vocab_inv[tok]] = int(freq)
         
-    trained_model = train_logistic_regression(labels, encoded_sequences, args.max_iter)
-    joblib.dump(trained_model, args.pb_model)
-    #if args.train_on_gpu:
-        ##num_outputs = num_labels[args.language][args.feature]
-        #num_outputs = len(label_classes[args.feature])
-        #net = mx.gluon.nn.Sequential()
-        #with net.name_scope():
-            ##net.add(mx.gluon.nn.Dense(1024, activation="tanh"))
-            #net.add(mx.gluon.nn.Dense(num_outputs))
-        ##net.collect_params().initialize(mx.init.Normal(sigma=1.), ctx=context)
-        #net.initialize(mx.init.Xavier(), ctx=context)
-        #trained_model = train_logistic_regression_gpu(labels, encoded_tokens, args.max_iter, context, args.batch_size, net, args.epochs, args.patience)
-        #net.save_parameters(args.out_model)
-    #else:
-        #trained_model = train_logistic_regression(labels, encoded_tokens, args.max_iter, context)
-        #joblib.dump(trained_model, args.out_model)
+    
+    if args.train_on_gpu:
+        num_outputs = len(source_vocabs[0])
+        net = mx.gluon.nn.Sequential()
+        with net.name_scope():
+            #net.add(mx.gluon.nn.Dense(1024, activation="tanh"))
+            net.add(mx.gluon.nn.Dense(num_outputs))
+        #net.collect_params().initialize(mx.init.Normal(sigma=1.), ctx=context)
+        net.initialize(mx.init.Xavier(), ctx=context)
+        trained_model = train_logistic_regression_gpu(labels, encoded_sequences, args.max_iter, context, args.batch_size, net, args.epochs, args.patience)
+        net.save_parameters(args.pb_model)
+    else:
+        trained_model = train_logistic_regression(labels, encoded_sequences, args.max_iter)
+        joblib.dump(trained_model, args.pb_model)
             
     
     
