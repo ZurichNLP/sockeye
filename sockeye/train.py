@@ -105,9 +105,10 @@ def check_arg_compatibility(args: argparse.Namespace):
                         "The attention-based copying mechanism currently supports RNN decoders only.")
 
     if args.instance_weighting:
-        check_condition(args.instance_weights_file is not None,
-                        "If %s is used, %s must be specified." % (C.TRAINING_ARG_INSTANCE_WEIGHTING,
-                                                                  C.TRAINING_ARG_INSTANCE_WEIGHTS_FILE))
+        if args.prepared_data is None:
+            check_condition(args.instance_weights_file is not None,
+                            "If %s is used, %s must be specified." % (C.TRAINING_ARG_INSTANCE_WEIGHTING,
+                                                                      C.TRAINING_ARG_INSTANCE_WEIGHTS_FILE))
         check_condition(args.loss == C.WEIGHTED_CROSS_ENTROPY,
                         "If %s is used, loss type must be %s" % (C.TRAINING_ARG_INSTANCE_WEIGHTING,
                                                                  C.WEIGHTED_CROSS_ENTROPY))
