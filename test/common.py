@@ -108,23 +108,34 @@ def generate_digits_file(source_path: str,
 
 
 def generate_floats_file(output_path: str,
-                         line_count: int = 100,
+                         train_target_path: str,
                          value_min: float = 0.0,
                          value_max: float = 1.0,
                          constant_value: Optional[float] = None,
-                         seed=13):
+                         seed=13,
+                         weight_type: Optional[str] = None):
 
     assert value_min < value_max
 
     random_gen = random.Random(seed)
 
-    with open(output_path, 'w') as fout:
-        for _ in range(line_count):
-            if constant_value is not None:
-                random_value = constant_value
+    def _random_value():
+        if constant_value is not None:
+            return str(constant_value)
+        else:
+            return str(random_gen.uniform(value_min, value_max))
+
+    with open(train_target_path, "r") as fin, open(output_path, 'w') as fout:
+        for line in fin:
+
+            if weight_type == "sentence":
+                random_value = _random_value()
+                all_weights = [random_value]
             else:
-                random_value = random_gen.uniform(value_min, value_max)
-            print(str(random_value), file=fout)
+                target_tokens = line.strip().split(" ")
+                all_weights = [_random_value() for _ in target_tokens]
+
+            print(" ".join(all_weights), file=fout)
 
 
 def generate_low_high_factors(source_path: str,
@@ -160,7 +171,8 @@ def tmp_digits_dataset(prefix: str,
                        test_line_count: int, test_line_count_empty: int, test_max_length: int,
                        sort_target: bool = False,
                        seed_train: int = 13, seed_dev: int = 13,
-                       with_source_factors: bool = False) -> Dict[str, Any]:
+                       with_source_factors: bool = False,
+                       weight_type: Optional[str] = None) -> Dict[str, Any]:
     """
     Creates a temporary dataset with train, dev, and test. Returns a dictionary with paths to the respective temporary
     files.
@@ -180,8 +192,9 @@ def tmp_digits_dataset(prefix: str,
                              seed=seed_dev)
         generate_digits_file(test_source_path, test_target_path, test_line_count, test_max_length,
                              line_count_empty=test_line_count_empty, sort_target=sort_target, seed=seed_dev)
-        generate_floats_file(train_weights_path, line_count=train_line_count, value_min=0.0,
-                             value_max=1.0, seed=seed_train)
+
+        generate_floats_file(train_weights_path, train_target_path=train_target_path, value_min=0.0,
+                                 value_max=1.0, seed=seed_train, weight_type=weight_type)
         data = {'work_dir': work_dir,
                 'train_source': train_source_path,
                 'train_target': train_target_path,

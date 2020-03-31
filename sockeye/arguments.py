@@ -393,10 +393,17 @@ def add_training_data_args(params, required=False):
                         required=False,
                         type=regular_file(),
                         default=None,
-                        help='Weights for training examples. One float per sentence pair, one per line.')
+                        help='Weights for training examples. One float per sentence pair, or one float per target token, depending '
+                             'on --instance-weighting-type.')
     params.add_argument(C.TRAINING_ARG_INSTANCE_WEIGHTING,
                         action="store_true",
                         help='Use instance weighting for training.')
+    params.add_argument('--instance-weighting-type',
+                        required=False,
+                        type=str,
+                        default=C.INSTANCE_WEIGHTING_TYPE_SENTENCE,
+                        choices=C.INSTANCE_WEIGHTING_TYPES,
+                        help='Specify whether weights are on sentence or target token level.')
 
 
 def add_validation_data_params(params):

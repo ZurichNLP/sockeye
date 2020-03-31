@@ -269,7 +269,8 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
             batch_size=args.batch_size,
             batch_by_words=batch_by_words,
             batch_num_devices=batch_num_devices,
-            instance_weighting=args.instance_weighting)
+            instance_weighting=args.instance_weighting,
+            instance_weighting_type=args.instance_weighting_type)
 
         check_condition(args.source_factors_combine == C.SOURCE_FACTORS_COMBINE_SUM \
                         or len(source_vocabs) == len(args.source_factors_num_embed) + 1,
@@ -356,7 +357,8 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
             bucketing=not args.no_bucketing,
             bucket_width=args.bucket_width,
             instance_weights_path=args.instance_weights_file,
-            instance_weighting=args.instance_weighting)
+            instance_weighting=args.instance_weighting,
+            instance_weighting_type=args.instance_weighting_type)
 
         data_info_fname = os.path.join(output_folder, C.DATA_INFO)
         logger.info("Writing data config to '%s'", data_info_fname)

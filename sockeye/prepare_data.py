@@ -90,6 +90,7 @@ def prepare_data(args: argparse.Namespace):
                          min_num_shards=minimum_num_shards,
                          instance_weights_fname=args.instance_weights_file,
                          instance_weighting=args.instance_weighting,
+                         instance_weighting_type=args.instance_weighting_type,
                          output_prefix=output_folder)
 
 

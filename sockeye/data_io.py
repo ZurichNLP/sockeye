@@ -438,7 +438,8 @@ def shard_threeway_data(source_fnames: List[str],
                         length_ratio_mean: float,
                         length_ratio_std: float,
                         output_prefix: str,
-                        instance_weights_fname: str) -> Tuple[List[Tuple[List[str], str, str, 'DataStatistics']], 'DataStatistics']:
+                        instance_weights_fname: str,
+                        instance_weighting_type: str) -> Tuple[List[Tuple[List[str], str, str, 'DataStatistics']], 'DataStatistics']:
     """
     Assign int-coded source/target sentence pairs to shards at random.
 
@@ -452,6 +453,7 @@ def shard_threeway_data(source_fnames: List[str],
     :param length_ratio_std: Standard deviation of length ratios.
     :param output_prefix: The prefix under which the shard files will be created.
     :param instance_weights_fname: Path to file with instance weights.
+    :param instance_weighting_type:  Whether weights are one per sentence, or one weight per target token.
     :return: Tuple of source (and source factor) file names, target file names and statistics for each shard,
              as well as global statistics.
     """
@@ -480,7 +482,9 @@ def shard_threeway_data(source_fnames: List[str],
         source_readers, target_reader = create_sequence_readers(source_fnames, target_fname,
                                                                 source_vocabs, target_vocab)
 
-        weight_reader = FloatReader(instance_weights_fname)
+        weight_reader = FloatReader(path=instance_weights_fname,
+                                    limit=None,
+                                    instance_weighting_type=instance_weighting_type)
 
         random_shard_iter = iter(lambda: random.randrange(num_shards), None)
 
@@ -610,6 +614,7 @@ class RawThreewayDatasetLoader:
     :param eos_id: End-of-sentence id.
     :param pad_id: Padding id.
     :param default_weight_float: default weight for the unweighted case.
+    :param instance_weighting_type: Whether weights are one per sentence, or one weight per target token.
     :param eos_id: Unknown id.
     :param skip_blanks: Whether to skip blank lines.
     :param dtype: Data type.
@@ -620,6 +625,7 @@ class RawThreewayDatasetLoader:
                  eos_id: int,
                  pad_id: int,
                  default_weight_float: float = 1.0,
+                 instance_weighting_type: str = None,
                  skip_blanks: bool = True,
                  dtype: str = 'float32') -> None:
         self.buckets = buckets
@@ -628,12 +634,14 @@ class RawThreewayDatasetLoader:
         self.default_weight_float = default_weight_float
         self.skip_blanks = skip_blanks
         self.dtype = dtype
+        self.instance_weighting_type = instance_weighting_type
 
     def load(self,
              source_iterables: Sequence[Iterable],
              target_iterable: Iterable,
              num_samples_per_bucket: List[int],
-             instance_weights_iterable: Iterable = None) -> 'ThreewayDataSet':
+             instance_weights_iterable: Iterable = None,
+             for_validation: bool = False) -> 'ThreewayDataSet':
 
         assert len(num_samples_per_bucket) == len(self.buckets)
         num_factors = len(source_iterables)
@@ -685,7 +693,12 @@ class RawThreewayDatasetLoader:
             # we can try again to compute the label sequence on the fly in next().
             data_label[buck_index][sample_index, :target_len] = target[1:] + [self.eos_id]
 
-            data_weight[buck_index][sample_index] = [weight] * buck[1]
+            if for_validation or self.instance_weighting_type == C.INSTANCE_WEIGHTING_TYPE_SENTENCE:
+                # single weight for sentence or dummy weight from dummy float reader
+                data_weight[buck_index][sample_index] = weight * buck[1]
+            else:
+                # weight contains weights for all valid target labels
+                data_weight[buck_index][sample_index, :target_len] = weight + [self.default_weight_float]
 
             bucket_sample_index[buck_index] += 1
 
@@ -731,6 +744,7 @@ def prepare_data(source_fnames: List[str],
                  output_prefix: str,
                  instance_weights_fname: Optional[str],
                  instance_weighting: bool = False,
+                 instance_weighting_type: str = None,
                  keep_tmp_shard_files: bool = False):
     logger.info("Preparing data.")
     # write vocabularies to data folder
@@ -767,11 +781,13 @@ def prepare_data(source_fnames: List[str],
                                                       length_ratio_mean=length_statistics.length_ratio_mean,
                                                       length_ratio_std=length_statistics.length_ratio_std,
                                                       output_prefix=output_prefix,
-                                                      instance_weights_fname=instance_weights_fname)
+                                                      instance_weights_fname=instance_weights_fname,
+                                                      instance_weighting_type=instance_weighting_type)
 
         data_loader = RawThreewayDatasetLoader(buckets=buckets,
                                                eos_id=target_vocab[C.EOS_SYMBOL],
-                                               pad_id=C.PAD_ID)
+                                               pad_id=C.PAD_ID,
+                                               instance_weighting_type=instance_weighting_type)
     else:
         shards, data_statistics = shard_data(source_fnames=source_fnames,
                                              target_fname=target_fname,
@@ -795,8 +811,14 @@ def prepare_data(source_fnames: List[str],
         for shard_idx, (shard_sources, shard_target, shard_weight, shard_stats) in enumerate(shards):
             sources_sentences = [SequenceReader(s) for s in shard_sources]
             target_sentences = SequenceReader(shard_target)
-            weight_reader = FloatReader(shard_weight)
-            dataset = data_loader.load(sources_sentences, target_sentences, shard_stats.num_sents_per_bucket, weight_reader)
+            weight_reader = FloatReader(path=shard_weight,
+                                        limit=None,
+                                        instance_weighting_type=instance_weighting_type)
+            dataset = data_loader.load(sources_sentences,
+                                       target_sentences,
+                                       shard_stats.num_sents_per_bucket,
+                                       weight_reader,
+                                       for_validation=False)
             shard_fname = os.path.join(output_prefix, C.SHARD_NAME % shard_idx)
             shard_stats.log()
             logger.info("Writing '%s'", shard_fname)
@@ -828,7 +850,8 @@ def prepare_data(source_fnames: List[str],
                          shared_vocab=shared_vocab,
                          num_shards=num_shards,
                          instance_weighting=instance_weighting,
-                         instance_weights_file=instance_weights_fname)
+                         instance_weights_file=instance_weights_fname,
+                         instance_weighting_type=instance_weighting_type)
     data_info_fname = os.path.join(output_prefix, C.DATA_INFO)
     logger.info("Writing data info to '%s'", data_info_fname)
     data_info.save(data_info_fname)
@@ -913,11 +936,12 @@ def get_validation_data_iter(data_loader: Union[RawParallelDatasetLoader,RawThre
 
     if instance_weighting:
         # insert dummy weights for validation data, for unweighted loss
-        instance_weights_reader = DummyFloatReader(1.0)
+        instance_weights_reader = DummyFloatReader(constant_value=1.0)
 
         validation_data = data_loader.load(validation_sources_sentences, validation_target_sentences,
                                            validation_data_statistics.num_sents_per_bucket,
-                                           instance_weights_reader).fill_up(bucket_batch_sizes)
+                                           instance_weights_reader,
+                                           for_validation=True).fill_up(bucket_batch_sizes)
 
         return ThreewaySampleIter(data=validation_data,
                                   buckets=buckets,
@@ -943,6 +967,7 @@ def get_prepared_data_iters(prepared_data_dir: str,
                             batch_by_words: bool,
                             batch_num_devices: int,
                             instance_weighting: bool,
+                            instance_weighting_type: str,
                             permute: bool = True) -> Tuple['BaseParallelSampleIter',
                                                            'BaseParallelSampleIter',
                                                            'DataConfig', List[vocab.Vocab], vocab.Vocab]:
@@ -981,6 +1006,11 @@ def get_prepared_data_iters(prepared_data_dir: str,
                                                                         "Specify or omit %s consistently when training "
                                                                         "and preparing the data." % C.TRAINING_ARG_INSTANCE_WEIGHTING)
 
+    check_condition(instance_weighting_type == data_info.instance_weighting_type, "Instance weighting type must match those"
+                                                                        "of prepared data."
+                                                                        "Set --instance-weighting-type consistently when training "
+                                                                        "and preparing the data.")
+
     source_vocabs = vocab.load_source_vocabs(prepared_data_dir)
     target_vocab = vocab.load_target_vocab(prepared_data_dir)
 
@@ -1009,7 +1039,8 @@ def get_prepared_data_iters(prepared_data_dir: str,
                                                permute=permute)
         data_loader = RawThreewayDatasetLoader(buckets=buckets,
                                                eos_id=target_vocab[C.EOS_SYMBOL],
-                                               pad_id=C.PAD_ID)
+                                               pad_id=C.PAD_ID,
+                                               instance_weighting_type=instance_weighting_type)
     else:
         train_iter = ShardedParallelSampleIter(shard_fnames,
                                                buckets,
@@ -1055,6 +1086,7 @@ def get_training_data_iters(sources: List[str],
                             bucket_width: int,
                             instance_weights_path: Optional[str],
                             instance_weighting: bool = False,
+                            instance_weighting_type: Optional[str] = None,
                             allow_empty: bool = False) -> Tuple['BaseParallelSampleIter',
                                                                 Optional['BaseParallelSampleIter'],
                                                                 'DataConfig', 'DataInfo']:
@@ -1079,6 +1111,7 @@ def get_training_data_iters(sources: List[str],
     :param bucket_width: Size of buckets.
     :param instance_weights_path: path to file with float weights, one for each sentence pair.
     :param instance_weighting: Whether to include instance weights in batches.
+    :param instance_weighting_type: Whether weights are one per sentence, or one weight per target token.
     :param allow_empty: Unless True if no sentences are below or equal to the maximum length an exception is raised.
     :return: Tuple of (training data iterator, validation data iterator, data config).
     """
@@ -1121,15 +1154,19 @@ def get_training_data_iters(sources: List[str],
     # Pass 3: Load the data into memory and return the iterator.
 
     if instance_weighting:
-        instance_weights_reader = FloatReader(instance_weights_path)
+        instance_weights_reader = FloatReader(path=instance_weights_path,
+                                              limit=None,
+                                              instance_weighting_type=instance_weighting_type)
 
         data_loader = RawThreewayDatasetLoader(buckets=buckets,
                                                eos_id=target_vocab[C.EOS_SYMBOL],
-                                               pad_id=C.PAD_ID)
+                                               pad_id=C.PAD_ID,
+                                               instance_weighting_type=instance_weighting_type)
 
         training_data = data_loader.load(sources_sentences, target_sentences,
                                          data_statistics.num_sents_per_bucket,
-                                         instance_weights_reader).fill_up(bucket_batch_sizes)
+                                         instance_weights_reader,
+                                         for_validation=False).fill_up(bucket_batch_sizes)
     else:
         data_loader = RawParallelDatasetLoader(buckets=buckets,
                                                         eos_id=target_vocab[C.EOS_SYMBOL],
@@ -1145,7 +1182,8 @@ def get_training_data_iters(sources: List[str],
                          shared_vocab=shared_vocab,
                          num_shards=1,
                          instance_weighting=instance_weighting,
-                         instance_weights_file=instance_weights_path)
+                         instance_weights_file=instance_weights_path,
+                         instance_weighting_type=instance_weighting_type)
 
     config_data = DataConfig(data_statistics=data_statistics,
                              max_seq_len_source=max_seq_len_source,
@@ -1340,7 +1378,8 @@ class DataInfo(config.Config):
                  shared_vocab: bool,
                  num_shards: int,
                  instance_weighting: Optional[bool],
-                 instance_weights_file: Optional[str]) -> None:
+                 instance_weights_file: Optional[str],
+                 instance_weighting_type: Optional[str]) -> None:
         super().__init__()
         self.sources = sources
         self.target = target
@@ -1350,6 +1389,7 @@ class DataInfo(config.Config):
         self.num_shards = num_shards
         self.instance_weighting = instance_weighting
         self.instance_weights_file = instance_weights_file
+        self.instance_weighting_type = instance_weighting_type
 
 
 class DataConfig(config.Config):
@@ -1491,22 +1531,30 @@ class FloatReader(Iterable):
 
     :param path: Path to read data from.
     :param limit: Read limit.
+    :param instance_weighting_type:  Whether weights are one per sentence, or one weight per target token.
     """
 
     def __init__(self,
                  path: str,
-                 limit: Optional[int] = None) -> None:
+                 limit: Optional[int] = None,
+                 instance_weighting_type: Optional[str] = None) -> None:
         self.path = path
         self.limit = limit
+        self.instance_weighting_type = instance_weighting_type
 
     def __iter__(self):
         for tokens in read_content(self.path, self.limit):
-            num = float(tokens[0])
-            yield num
+            if self.instance_weighting_type == C.INSTANCE_WEIGHTING_TYPE_SENTENCE:
+                yield [float(tokens[0])]
+            else:
+                yield [float(num) for num in tokens]
+
 
 class DummyFloatReader(Iterable):
     """
         Returns a constant float for every iteration.
+
+        :param constant_value: Float to return every time the generator is called.
         """
 
     def __init__(self,
@@ -1515,7 +1563,7 @@ class DummyFloatReader(Iterable):
 
     def __iter__(self):
         while True:
-            yield self.constant_value
+            yield [self.constant_value]
 
 
 def create_sequence_readers(sources: List[str], target: str,

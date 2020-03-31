@@ -246,7 +246,8 @@ def get_training_image_text_data_iters(source_root: str,
                          shared_vocab=False,
                          num_shards=1,
                          instance_weighting=False,
-                         instance_weights_file=None)
+                         instance_weights_file=None,
+                         instance_weighting_type=None)
 
     config_data = DataConfig(data_statistics=data_statistics,
                              max_seq_len_source=0,
