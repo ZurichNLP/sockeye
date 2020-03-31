@@ -504,7 +504,7 @@ def shard_threeway_data(source_fnames: List[str],
             for i, line in enumerate(sources):
                 sources_shards[i][random_shard_index].write(ids2strids(line) + "\n")
             target_shards[random_shard_index].write(ids2strids(target) + "\n")
-            weight_shards[random_shard_index].write(str(weight) + "\n")
+            weight_shards[random_shard_index].write(" ".join(weight) + "\n")
 
     per_shard_stats = [shard_stat_accumulator.statistics for shard_stat_accumulator in per_shard_stat_accumulators]
 
