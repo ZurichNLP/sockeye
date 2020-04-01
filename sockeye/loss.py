@@ -186,7 +186,7 @@ class CrossEntropyLoss(Loss):
 
 class WeightedCrossEntropyLoss(Loss):
     """
-    Computes a weighted variant of the cross-entropy loss. Assumes 1 weight for each item in a batch.
+    Computes a weighted variant of the cross-entropy loss. Assumes 1 weight for each label in a batch.
 
     :param loss_config: Loss configuration.
     """
@@ -211,12 +211,6 @@ class WeightedCrossEntropyLoss(Loss):
         :param weights: Shape: (batch size * target_seq_len)
         :return: List of loss symbols.
         """
-        if self.loss_config.normalization_type == C.LOSS_NORM_VALID:
-            normalization = "valid"
-        elif self.loss_config.normalization_type == C.LOSS_NORM_BATCH:
-            normalization = "null"
-        else:
-            raise ValueError("Unknown loss normalization type: %s" % self.loss_config.normalization_type)
 
         # probs: (batch_size * target_seq_len, target_vocab_size)
         probs = mx.sym.softmax(data=logits, axis=1, name="step_softmax")
@@ -250,8 +244,12 @@ class WeightedCrossEntropyLoss(Loss):
         if self.loss_config.use_instance_weight:
             ce = ce * weights
 
+        if self.loss_config.normalization_type == C.LOSS_NORM_VALID:
+            # ce: (batch_size * target_seq_len)
+            ce = mx.sym.broadcast_div(ce, mx.sym.sum(labels != self.ignore_label))
+
         loss_value = mx.sym.MakeLoss(data=ce,
-                                     normalization=normalization,
+                                     normalization="null",
                                      name=self.name)
 
         probs = mx.sym.BlockGrad(probs, name=C.SOFTMAX_NAME)

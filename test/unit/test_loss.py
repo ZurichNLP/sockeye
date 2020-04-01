@@ -20,10 +20,11 @@ import sockeye.loss
 import sockeye.model
 
 
-def run_test_default_cross_entropy_loss(logits_np, labels_np, expected_softmax, expected_grads, label_smoothing):
+def run_test_default_cross_entropy_loss(logits_np, labels_np, expected_softmax, expected_grads, label_smoothing,
+                                        normalization_type=C.LOSS_NORM_BATCH):
     config = sockeye.loss.LossConfig(name=C.CROSS_ENTROPY,
                                      vocab_size=4,
-                                     normalization_type=C.LOSS_NORM_BATCH,
+                                     normalization_type=normalization_type,
                                      label_smoothing=label_smoothing)
     loss = sockeye.loss.get_loss(config)
     assert isinstance(loss, sockeye.loss.CrossEntropyLoss)
@@ -48,6 +49,7 @@ def run_test_default_cross_entropy_loss(logits_np, labels_np, expected_softmax, 
 
     executor.backward()
     actual_grads = executor.grad_dict["logits"].asnumpy()
+
     assert np.isclose(actual_grads, expected_grads).all()
     label_grad_sum = executor.grad_dict["labels"].asnumpy().sum()
     assert label_grad_sum == 0
@@ -56,10 +58,11 @@ def run_test_default_cross_entropy_loss(logits_np, labels_np, expected_softmax, 
 
 
 def run_test_custom_cross_entropy_loss(logits_np, labels_np, weights_np, expected_arguments, expected_softmax,
-                                       expected_loss, expected_grads, label_smoothing, use_instance_weight):
+                                       expected_loss, expected_grads, label_smoothing, use_instance_weight,
+                                       normalization_type=C.LOSS_NORM_BATCH):
     config = sockeye.loss.LossConfig(name=C.WEIGHTED_CROSS_ENTROPY,
                                      vocab_size=4,
-                                     normalization_type=C.LOSS_NORM_BATCH,
+                                     normalization_type=normalization_type,
                                      use_instance_weight=use_instance_weight,
                                      label_smoothing=label_smoothing)
     loss = sockeye.loss.get_loss(config)
@@ -280,7 +283,7 @@ def test_custom_cross_entropy_loss(logits_np, labels_np, weights_np, expected_ar
                                    expected_loss, expected_grads, label_smoothing, use_instance_weight)
 
 
-def test_default_custom_losses_equal():
+def test_default_custom_losses_batch_normalization_equal():
 
     logits_np = mx.nd.array([[1, 2, 3, 4],
                              [4, 2, 2, 2],
@@ -326,6 +329,64 @@ def test_default_custom_losses_equal():
             ['labels', 'logits', 'weights'], expected_softmax,
             expected_loss, expected_grads,
             label_smoothing, True)
+
+    assert np.isclose(default_grads, custom_weight_1_0_grads).all()
+
+    assert np.isclose(custom_weight_false_loss, custom_weight_1_0_loss).all()
+    assert np.isclose(custom_weight_false_softmax, custom_weight_1_0_softmax).all()
+
+
+def test_default_custom_losses_valid_normalization_equal():
+
+    logits_np = mx.nd.array([[1, 2, 3, 4],
+                             [4, 2, 2, 2],
+                             [3, 3, 3, 3],
+                             [4, 4, 4, 4]])
+
+    labels_np = mx.nd.array([1, 0, 2, 3])
+
+    weights_np = mx.nd.array([1.0, 1.0, 1.0, 1.0])
+
+    expected_softmax = np.asarray([[0.0320586, 0.08714432, 0.23688284, 0.64391428],
+                                   [0.71123451, 0.09625512, 0.09625512, 0.09625512],
+                                   [0.25, 0.25, 0.25, 0.25],
+                                   [0.25, 0.25, 0.25, 0.25]])
+
+    # loss is different since we do valid normalization in the forward pass for loss,
+    # while default only does it in backward pass for gradients
+    expected_loss_default = np.array([2.10685635, 0., 1.3862944, 1.3862944])
+
+    expected_loss_custom = expected_loss_default / np.sum(labels_np.asnumpy() != 0)
+
+    expected_grads = np.asarray([[-0.04486936, -0.13761857, 0.02340539, 0.15908253],
+                                 [ 0., 0., 0., 0.],
+                                 [ 0.02777778, 0.02777778, -0.08333334, 0.02777778],
+                                 [ 0.02777778, 0.02777778, 0.02777778, -0.08333334]])
+
+    label_smoothing = 0.5
+
+    default_grads = run_test_default_cross_entropy_loss(logits_np, labels_np, expected_softmax, expected_grads, label_smoothing,
+                                                        C.LOSS_NORM_VALID)
+
+    # do not use weights
+
+    custom_weight_false_grads, custom_weight_false_loss, custom_weight_false_softmax = \
+        run_test_custom_cross_entropy_loss(
+            logits_np, labels_np, weights_np,
+            ['labels', 'logits'], expected_softmax,
+            expected_loss_custom, expected_grads,
+            label_smoothing, False, C.LOSS_NORM_VALID)
+
+    assert np.isclose(default_grads, custom_weight_false_grads).all()
+
+    # set all weights to 1.0
+
+    custom_weight_1_0_grads, custom_weight_1_0_loss, custom_weight_1_0_softmax = \
+        run_test_custom_cross_entropy_loss(
+            logits_np, labels_np, weights_np,
+            ['labels', 'logits', 'weights'], expected_softmax,
+            expected_loss_custom, expected_grads,
+            label_smoothing, True, C.LOSS_NORM_VALID)
 
     assert np.isclose(default_grads, custom_weight_1_0_grads).all()
 
