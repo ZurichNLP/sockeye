@@ -165,12 +165,20 @@ def encode(inputs: List[Input],
             #else:
                 #encoded_sequences = mx.nd.concat(encoded_sequences, encoder_states.copy(), dim=0)
                 #labels = mx.nd.concat(labels, source, dim=0)
+            
+            position_range = np.arange(start=0, stop=source.shape[1])
+            ones = np.ones(shape=(source.shape[0], source.shape[1]))
+            pos_labels = position_range * ones # (batch, max_len)
+            pos_labels = pos_labels.reshape(-1)
+            
             if batch_id == 0:
                 encoded_sequences = encoder_states.reshape(shape=(-3, -1)).asnumpy()
                 labels = source.reshape(shape=(-3, -1)).asnumpy()
+                position_labels = pos_labels
             else:
                 encoded_sequences = np.concatenate((encoded_sequences, encoder_states.reshape(shape=(-3, -1)).asnumpy()))
                 labels = np.concatenate((labels, source.reshape(shape=(-3, -1)).asnumpy()) )
+                position_labels = np.concatenate((position_labels, pos_labels))
                 
             #encoder_states = encoder_states.reshape(-3, -1).asnumpy()
             ### important: need to make a copy here, previous output will change with next batch!
@@ -183,7 +191,7 @@ def encode(inputs: List[Input],
         #print(encoded_sequences)
         # labels (batch * src_len, factors=1) -> remove factors dimension 
         labels = labels.squeeze()
-        return encoded_sequences, labels # len(encoded_sequences)= number of batches
+        return encoded_sequences, labels, position_labels # len(encoded_sequences)= number of batches
 
         
 
@@ -205,71 +213,71 @@ def train_logistic_regression(labels: np.array, encoded_sequences: np.array, max
     model.fit(encoded_sequences, labels)
     return model
     
-#def train_logistic_regression_gpu(labels: np.array, encoded_sequences: np.array, max_iter: int, context: mx.context.Context, batch_size: int, net: mx.gluon.nn.Sequential, epochs: int=10, patience: int=10):
+def train_logistic_regression_gpu(labels: np.array, encoded_sequences: np.array, max_iter: int, context: mx.context.Context, batch_size: int, net: mx.gluon.nn.Sequential, epochs: int=10, patience: int=10):
     
-    #try:
-        #encoded_sequences = mx.nd.array((encoded_sequences),context)
+    try:
+        encoded_sequences = mx.nd.array((encoded_sequences),context)
         
-    #except mx.base.MXNetError: 
-        ## weird oom error, no fix yet 
-        #logger.error("out of memory, stopped")
-        #exit(1)
+    except mx.base.MXNetError: 
+        # weird oom error, no fix yet 
+        logger.error("out of memory, stopped")
+        exit(1)
        
-    ##(sample_size, max_length_subwords, hidden_dimension) = encoded_sequences.shape
-    ##encoded_sequences = encoded_sequences.reshape(sample_size, max_length_subwords * hidden_dimension)
-    #labels = mx.nd.array((labels),context)
-    #train_set = mx.gluon.data.ArrayDataset(encoded_sequences, labels)
-    #train_dataloader = mx.gluon.data.DataLoader(train_set, batch_size=batch_size, shuffle=True)
+    #(sample_size, max_length_subwords, hidden_dimension) = encoded_sequences.shape
+    #encoded_sequences = encoded_sequences.reshape(sample_size, max_length_subwords * hidden_dimension)
+    labels = mx.nd.array((labels),context)
+    train_set = mx.gluon.data.ArrayDataset(encoded_sequences, labels)
+    train_dataloader = mx.gluon.data.DataLoader(train_set, batch_size=batch_size, shuffle=True)
     
     
-    #logger.info("training on sample size: %s", len(labels))
-    #softmax_cross_entropy = mx.gluon.loss.SoftmaxCrossEntropyLoss()
-    #trainer = mx.gluon.Trainer(net.collect_params(), 'sgd', {'learning_rate': 0.1, 'wd' : 0.0001})
+    logger.info("training on sample size: %s", len(labels))
+    softmax_cross_entropy = mx.gluon.loss.SoftmaxCrossEntropyLoss()
+    trainer = mx.gluon.Trainer(net.collect_params(), 'sgd', {'learning_rate': 0.1, 'wd' : 0.0001})
 
-    #num_not_improved =0
-    #best_acc =0.0
-    #for epoch in range(epochs):
-        #cumulative_train_loss = 0
-        #for i, (data, label) in enumerate(train_dataloader):
-            #with mx.autograd.record():
-                ## Do forward pass on a batch of training data
-                #data = data.as_in_context(context)
-                #label = label.as_in_context(context)
-                #output = net(data)
+    num_not_improved =0
+    best_acc =0.0
+    for epoch in range(epochs):
+        cumulative_train_loss = 0
+        for i, (data, label) in enumerate(train_dataloader):
+            with mx.autograd.record():
+                # Do forward pass on a batch of training data
+                data = data.as_in_context(context)
+                label = label.as_in_context(context)
+                output = net(data)
 
-                ## Calculate loss for the training data batch
-                #loss_result = softmax_cross_entropy(output, label)
+                # Calculate loss for the training data batch
+                loss_result = softmax_cross_entropy(output, label)
 
-            ## Calculate gradients
-            #loss_result.backward()
+            # Calculate gradients
+            loss_result.backward()
 
-            ## Update parameters of the network
-            #trainer.step(batch_size)
+            # Update parameters of the network
+            trainer.step(batch_size)
 
-            ## sum losses of every batch
-            #cumulative_train_loss += mx.nd.sum(loss_result).asscalar()
+            # sum losses of every batch
+            cumulative_train_loss += mx.nd.sum(loss_result).asscalar()
 
-        #avg_train_loss = cumulative_train_loss / len(encoded_sequences)
-        #acc = evaluate_accuracy(train_dataloader, net, context)
-        #logger.info("epoch {}, average training loss {}, accuracy {}".format(epoch, avg_train_loss ,acc))
-        #if acc > best_acc:
-            #best_acc = acc
-        #else:
-            #num_not_improved +=1
-        #if num_not_improved >= patience:
-            #logger.info("Accuracy has not improved for {} epochs. Stopping Training.".format(num_not_improved))
-            #return model
-    #return model
+        avg_train_loss = cumulative_train_loss / len(encoded_sequences)
+        acc = evaluate_accuracy(train_dataloader, net, context)
+        logger.info("epoch {}, average training loss {}, accuracy {}".format(epoch, avg_train_loss ,acc))
+        if acc > best_acc:
+            best_acc = acc
+        else:
+            num_not_improved +=1
+        if num_not_improved >= patience:
+            logger.info("Accuracy has not improved for {} epochs. Stopping Training.".format(num_not_improved))
+            return model
+    return model
 
-#def evaluate_accuracy(data_iterator, net, context):
-    #acc = mx.metric.Accuracy()
-    #for i, (data, label) in enumerate(data_iterator):
-        #data = data.as_in_context(context)
-        #label = label.as_in_context(context)
-        #output = net(data)
-        #predictions = mx.nd.argmax(output, axis=1)
-        #acc.update(preds=predictions, labels=label)
-    #return acc.get()[1]
+def evaluate_accuracy(data_iterator, net, context):
+    acc = mx.metric.Accuracy()
+    for i, (data, label) in enumerate(data_iterator):
+        data = data.as_in_context(context)
+        label = label.as_in_context(context)
+        output = net(data)
+        predictions = mx.nd.argmax(output, axis=1)
+        acc.update(preds=predictions, labels=label)
+    return acc.get()[1]
     
 
 
@@ -293,7 +301,7 @@ def main():
                         type=int,
                         default=3000,
                         help='Maximum number of iterations for logistic regression classifier training. Default: %(default)s.')
-    parser.add_argument('--train-on-gpu',
+    parser.add_argument('--gluon-lr',
                         action='store_true',
                         help='Use Gluon to train logistic regression model on GPU (instead of sklearn on CPU). Default: %(default)s.')
     parser.add_argument('--save-label-frequencies',
@@ -315,6 +323,23 @@ def main():
                         required=True, 
                         type=str,
                         help='Text file with input to be encoded.')
+    parser.add_argument('--gluon-mlp',  
+                        required=False, 
+                        action='store_true',
+                        help='Train a gluon MLP instead of logistic regression (add a hidden layer).')
+    parser.add_argument('--gluon-mlp-hidden',  
+                        required=False, 
+                        type=int,
+                        default=1024,
+                        help='Size of hidden layer if MLP as classifier. Default: %(default)s.')
+    parser.add_argument('--gluon-mlp-act',  
+                        required=False, 
+                        type=str,
+                        default="tanh",
+                        help='Activation of hidden layer if MLP as classifier. Default: %(default)s.')
+    parser.add_argument('--predict-positions',
+                        action='store_true',
+                        help='Train a model to predict the positions from the encoded states. Default: %(default)s.')
     
     args = parser.parse_args()
     
@@ -352,7 +377,7 @@ def main():
     
     logger.info("encoding sentences")
     # lists of np.array , encoder states: (batch, maxlen, hidden), labels: (batch, maxlen, num_factors=1)
-    encoded_sequences, labels = encode(inputs=inputs,
+    encoded_sequences, labels, position_labels = encode(inputs=inputs,
            max_input_length=max_seq_len,
            max_batch_size=args.batch_size,
            source_vocabs=source_vocabs,
@@ -369,11 +394,13 @@ def main():
     if len(labels) > cutoff:
         (encoded_sequences, rest) = np.split(encoded_sequences, [cutoff])
         (labels, rest) = np.split(labels, [cutoff])
+        (position_labels, rest) = np.split(position_labels, [cutoff])
     
     # remove samples that are padding
     pad_id = source_vocabs[0]["<pad>"]
     pad_indexes = np.where(labels==pad_id)
     labels = np.delete(labels, pad_indexes)
+    position_labels = np.delete(position_labels, pad_indexes)
     encoded_sequences = np.delete(encoded_sequences, pad_indexes, axis=0)
     
     regression_config = { "sockeye-model": args.sockeye_model, 
@@ -393,25 +420,38 @@ def main():
             logger.debug("{} : {}".format(src_vocab_inv[tok], freq))
             regression_config["frequencies"][src_vocab_inv[tok]] = int(freq)
         
-    trained_model = train_logistic_regression(labels, encoded_sequences, args.max_iter)
-    joblib.dump(trained_model, args.pb_model)
-    #if args.train_on_gpu:
-        ##num_outputs = num_labels[args.language][args.feature]
-        #num_outputs = len(label_classes[args.feature])
-        #net = mx.gluon.nn.Sequential()
-        #with net.name_scope():
-            ##net.add(mx.gluon.nn.Dense(1024, activation="tanh"))
-            #net.add(mx.gluon.nn.Dense(num_outputs))
-        ##net.collect_params().initialize(mx.init.Normal(sigma=1.), ctx=context)
-        #net.initialize(mx.init.Xavier(), ctx=context)
-        #trained_model = train_logistic_regression_gpu(labels, encoded_tokens, args.max_iter, context, args.batch_size, net, args.epochs, args.patience)
-        #net.save_parameters(args.out_model)
-    #else:
-        #trained_model = train_logistic_regression(labels, encoded_tokens, args.max_iter, context)
-        #joblib.dump(trained_model, args.out_model)
+    
+    if args.gluon_lr or args.gluon_mlp:
+        if args.predict_positions:
+            num_outputs = max_seq_len
+            net = mx.gluon.nn.Sequential()
+            with net.name_scope():
+                #net.add(mx.gluon.nn.Dense(1024, activation="tanh"))
+                net.add(mx.gluon.nn.Dense(num_outputs))
+            #net.collect_params().initialize(mx.init.Normal(sigma=1.), ctx=context)
+            net.initialize(mx.init.Xavier(), ctx=context)
+            trained_model = train_logistic_regression_gpu(position_labels, encoded_sequences, args.max_iter, context, args.batch_size, net, args.epochs, args.patience)
+            net.save_parameters(args.pb_model)
+            
+        else:
+            num_outputs = len(source_vocabs[0])
+            net = mx.gluon.nn.Sequential()
+            with net.name_scope():
+                if args.gluon_mlp:
+                    net.add(mx.gluon.nn.Dense(args.gluon_mlp_hidden, activation=args.gluon_mlp_act))
+                net.add(mx.gluon.nn.Dense(num_outputs))
+            #net.collect_params().initialize(mx.init.Normal(sigma=1.), ctx=context)
+            net.initialize(mx.init.Xavier(), ctx=context)
+            trained_model = train_logistic_regression_gpu(labels, encoded_sequences, args.max_iter, context, args.batch_size, net, args.epochs, args.patience)
+            net.save_parameters(args.pb_model)
+    else:
+        trained_model = train_logistic_regression(labels, encoded_sequences, args.max_iter)
+        joblib.dump(trained_model, args.pb_model)
             
     
-    
+    if args.gluon_mlp:
+        regression_config["gluon-mlp-hidden"] = args.gluon_mlp_hidden
+        regression_config["gluon-mlp-act"] = args.gluon_mlp_act
     with open( args.pb_model + ".conf.json", 'w') as json_file:
         json.dump(regression_config, json_file)
 
