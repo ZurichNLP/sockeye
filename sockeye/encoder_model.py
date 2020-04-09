@@ -118,7 +118,8 @@ class EncoderModel(model.SockeyeModel):
 
             data_names = [C.SOURCE_NAME]
             label_names = []  # type: List[str]
-            return mx.sym.Group([source_encoded]), data_names, label_names
+            result = [source_encoded, pos_embed, position_probs]
+            return mx.sym.Group(result), data_names, label_names
 
         default_bucket_key = self.max_input_length
         module = mx.mod.BucketingModule(sym_gen=sym_gen,

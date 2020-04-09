@@ -44,6 +44,9 @@ def main():
                         action='store_true',
                         default=False,
                         help='Print distribution of labels for each class. Default: %(default)s.')
+    parser.add_argument('--predict-positions',
+                        action='store_true',
+                        help='Train a model to predict the positions from the encoded states. Default: %(default)s.')
     
     
     
@@ -52,8 +55,8 @@ def main():
     with open(args.input) as infile:
         input_sequences = infile.read().splitlines()
     
-    max_seq = max([list(data_io.get_tokens(source_sentence)) for source_sentence in input_sequences], key=len)
-    max_seq_len = len(max_seq) + 1 # eos
+    #max_seq = max([list(data_io.get_tokens(source_sentence)) for source_sentence in input_sequences], key=len)
+    #max_seq_len = len(max_seq) + 1 # eos
     
     with ExitStack() as exit_stack:
         context = utils.determine_context(device_ids=args.device_ids,
@@ -71,7 +74,7 @@ def main():
     with open(regression_config) as json_file:
         regression_config = json.load(json_file)
         sockeye_model = regression_config["sockeye-model"] 
-        
+        max_seq_len = regression_config["max-seq-len"]
         
         # load vocab, config + sockeye model
         source_vocabs = vocab.load_source_vocabs(sockeye_model)
@@ -88,7 +91,7 @@ def main():
                         max_input_length=max_seq_len)
         inputs = probing_task_train.make_inputs(input_sequences) 
         
-        encoded_sequences, labels = probing_task_train.encode(inputs=inputs,
+        encoded_sequences, labels, position_labels = probing_task_train.encode(inputs=inputs,
            max_input_length=max_seq_len,
            max_batch_size=args.batch_size,
            source_vocabs=source_vocabs,
@@ -100,6 +103,7 @@ def main():
         pad_id = source_vocabs[0]["<pad>"]
         pad_indexes = np.where(labels==pad_id)
         labels = np.delete(labels, pad_indexes)
+        position_labels = np.delete(position_labels, pad_indexes)
         encoded_sequences = np.delete(encoded_sequences, pad_indexes, axis=0)
         
         if args.print_labels:
@@ -120,15 +124,29 @@ def main():
             result = trained_model.score(encoded_sequences, labels)
             print(result)
         elif args.gluon_model is not None:
-            num_outputs = len(source_vocabs[0])
-            net = mx.gluon.nn.Sequential()
-            with net.name_scope():
-                net.add(mx.gluon.nn.Dense(num_outputs))
-            net.load_parameters(args.gluon_model, ctx=context)
+            if args.predict_positions:
+                num_outputs = max_seq_len
+                net = mx.gluon.nn.Sequential()
+                with net.name_scope():
+                    net.add(mx.gluon.nn.Dense(num_outputs))
+                net.load_parameters(args.gluon_model, ctx=context)
+                
+                test_set = mx.gluon.data.ArrayDataset(encoded_sequences, position_labels)
+                test_dataloader = mx.gluon.data.DataLoader(test_set, batch_size=args.batch_size, shuffle=False)
+                print("testing on {} samples".format(len(position_labels)))
+                print(probing_task_train.evaluate_accuracy(test_dataloader, net, context))
+                
+            else:
+                num_outputs = len(source_vocabs[0])
+                net = mx.gluon.nn.Sequential()
+                with net.name_scope():
+                    net.add(mx.gluon.nn.Dense(num_outputs))
+                net.load_parameters(args.gluon_model, ctx=context)
             
-            test_set = mx.gluon.data.ArrayDataset(encoded_sequences, labels)
-            test_dataloader = mx.gluon.data.DataLoader(test_set, batch_size=args.batch_size, shuffle=False)
-            print(probing_task_train.evaluate_accuracy(test_dataloader, net, context))
+                test_set = mx.gluon.data.ArrayDataset(encoded_sequences, labels)
+                test_dataloader = mx.gluon.data.DataLoader(test_set, batch_size=args.batch_size, shuffle=False)
+                print("testing on {} samples".format(len(labels)))
+                print(probing_task_train.evaluate_accuracy(test_dataloader, net, context))
 
 if __name__ == '__main__':
     main()

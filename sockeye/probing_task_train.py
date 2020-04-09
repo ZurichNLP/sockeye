@@ -152,12 +152,21 @@ def encode(inputs: List[Input],
 
             inputs = [indexed_input.input for indexed_input in batch]
             source = _get_encode_input(inputs, max_input_length, source_vocabs, context)
-            encoder_states = s_model.run_encoder(source, max_input_length)[0]
+            (encoder_states, pos_embed, positional_attention) = s_model.run_encoder(source, max_input_length)
             #remove repeated sequences from filling up batch
             if rest>0:
                 batches = encoder_states
                 batches = batches[:len(batches)-rest]
                 encoder_states =batches
+                
+                batches_pos_embed = pos_embed
+                batches_pos_embed = batches_pos_embed[:len(batches_pos_embed)-rest]
+                pos_embed = batches_pos_embed
+                
+                batches_pos_att = positional_attention
+                batches_pos_att = batches_pos_att[:len(batches_pos_att)-rest]
+                positional_attention = batches_pos_att
+            
                 source = source[:len(source)-rest]                
             #if batch_id == 0:
                 #encoded_sequences = encoder_states.copy()
@@ -165,12 +174,20 @@ def encode(inputs: List[Input],
             #else:
                 #encoded_sequences = mx.nd.concat(encoded_sequences, encoder_states.copy(), dim=0)
                 #labels = mx.nd.concat(labels, source, dim=0)
+            position_range = np.arange(start=0, stop=source.shape[1])
+            ones = np.ones(shape=(source.shape[0], source.shape[1]))
+            pos_labels = position_range * ones # (batch, max_len)
+            pos_labels = pos_labels.reshape(-1)
+          
             if batch_id == 0:
-                encoded_sequences = encoder_states.reshape(shape=(-3, -1)).asnumpy()
+                encoded_sequences = encoder_states.reshape(shape=(-3, -1)).asnumpy() # (batch, seq_len, hidden) -> (batch*seq_len, hidden)
                 labels = source.reshape(shape=(-3, -1)).asnumpy()
+                position_labels = pos_labels
+                
             else:
                 encoded_sequences = np.concatenate((encoded_sequences, encoder_states.reshape(shape=(-3, -1)).asnumpy()))
                 labels = np.concatenate((labels, source.reshape(shape=(-3, -1)).asnumpy()) )
+                position_labels = np.concatenate((position_labels, pos_labels))
                 
             #encoder_states = encoder_states.reshape(-3, -1).asnumpy()
             ### important: need to make a copy here, previous output will change with next batch!
@@ -183,7 +200,7 @@ def encode(inputs: List[Input],
         #print(encoded_sequences)
         # labels (batch * src_len, factors=1) -> remove factors dimension 
         labels = labels.squeeze()
-        return encoded_sequences, labels # len(encoded_sequences)= number of batches
+        return encoded_sequences, labels, position_labels # len(encoded_sequences)= number of batches
 
         
 
@@ -315,6 +332,9 @@ def main():
                         required=True, 
                         type=str,
                         help='Text file with input to be encoded.')
+    parser.add_argument('--predict-positions',
+                        action='store_true',
+                        help='Train a model to predict the positions from the encoded states. Default: %(default)s.')
     
     args = parser.parse_args()
     
@@ -352,7 +372,7 @@ def main():
     
     logger.info("encoding sentences")
     # lists of np.array , encoder states: (batch, maxlen, hidden), labels: (batch, maxlen, num_factors=1)
-    encoded_sequences, labels = encode(inputs=inputs,
+    encoded_sequences, labels, position_labels = encode(inputs=inputs,
            max_input_length=max_seq_len,
            max_batch_size=args.batch_size,
            source_vocabs=source_vocabs,
@@ -369,11 +389,14 @@ def main():
     if len(labels) > cutoff:
         (encoded_sequences, rest) = np.split(encoded_sequences, [cutoff])
         (labels, rest) = np.split(labels, [cutoff])
+        (position_labels, rest) = np.split(position_labels, [cutoff])
+    
     
     # remove samples that are padding
     pad_id = source_vocabs[0]["<pad>"]
     pad_indexes = np.where(labels==pad_id)
     labels = np.delete(labels, pad_indexes)
+    position_labels = np.delete(position_labels, pad_indexes)
     encoded_sequences = np.delete(encoded_sequences, pad_indexes, axis=0)
     
     regression_config = { "sockeye-model": args.sockeye_model, 
@@ -395,15 +418,27 @@ def main():
         
     
     if args.train_on_gpu:
-        num_outputs = len(source_vocabs[0])
-        net = mx.gluon.nn.Sequential()
-        with net.name_scope():
-            #net.add(mx.gluon.nn.Dense(1024, activation="tanh"))
-            net.add(mx.gluon.nn.Dense(num_outputs))
-        #net.collect_params().initialize(mx.init.Normal(sigma=1.), ctx=context)
-        net.initialize(mx.init.Xavier(), ctx=context)
-        trained_model = train_logistic_regression_gpu(labels, encoded_sequences, args.max_iter, context, args.batch_size, net, args.epochs, args.patience)
-        net.save_parameters(args.pb_model)
+        if args.predict_positions:
+            num_outputs = max_seq_len
+            net = mx.gluon.nn.Sequential()
+            with net.name_scope():
+                #net.add(mx.gluon.nn.Dense(1024, activation="tanh"))
+                net.add(mx.gluon.nn.Dense(num_outputs))
+            #net.collect_params().initialize(mx.init.Normal(sigma=1.), ctx=context)
+            net.initialize(mx.init.Xavier(), ctx=context)
+            trained_model = train_logistic_regression_gpu(position_labels, encoded_sequences, args.max_iter, context, args.batch_size, net, args.epochs, args.patience)
+            net.save_parameters(args.pb_model)
+            
+        else:
+            num_outputs = len(source_vocabs[0])
+            net = mx.gluon.nn.Sequential()
+            with net.name_scope():
+                #net.add(mx.gluon.nn.Dense(1024, activation="tanh"))
+                net.add(mx.gluon.nn.Dense(num_outputs))
+            #net.collect_params().initialize(mx.init.Normal(sigma=1.), ctx=context)
+            net.initialize(mx.init.Xavier(), ctx=context)
+            trained_model = train_logistic_regression_gpu(labels, encoded_sequences, args.max_iter, context, args.batch_size, net, args.epochs, args.patience)
+            net.save_parameters(args.pb_model)
     else:
         trained_model = train_logistic_regression(labels, encoded_sequences, args.max_iter)
         joblib.dump(trained_model, args.pb_model)
