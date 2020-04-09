@@ -412,6 +412,7 @@ EVALUATE_METRICS = [BLEU, CHRF, ROUGE1, ROUGE2, ROUGEL]
 # loss
 CROSS_ENTROPY = 'cross-entropy'
 WEIGHTED_CROSS_ENTROPY = 'weighted-cross-entropy'
+CUSTOM_CROSS_ENTROPY = 'custom-cross-entropy'
 LENRATIO_REGRESSION = 'length-ratio-regression'
 
 LINK_NORMAL = 'normal'

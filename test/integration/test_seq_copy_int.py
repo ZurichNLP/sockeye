@@ -189,6 +189,18 @@ ENCODER_DECODER_SETTINGS = [
      " --loss weighted-cross-entropy",
      "--beam-size 2 --nbest-size 2",
      False, False, None),
+    # Full transformer with custom cross entropy loss
+    ("--encoder transformer --decoder transformer"
+     " --num-layers 2 --transformer-attention-heads 2 --transformer-model-size 8 --num-embed 8"
+     " --transformer-feed-forward-num-hidden 16"
+     " --transformer-dropout-prepost 0.1 --transformer-preprocess n --transformer-postprocess dr"
+     " --weight-tying --weight-tying-type src_trg_softmax"
+     " --weight-init-scale=3.0 --weight-init-xavier-factor-type=avg --embed-weight-init=normal"
+     " --batch-size 2 --max-updates 2 --batch-type sentence --decode-and-evaluate 0"
+     " --checkpoint-interval 2 --optimizer adam --initial-learning-rate 0.01"
+     " --loss custom-cross-entropy",
+     "--beam-size 2 --nbest-size 2",
+     False, False, None),
     # Full transformer with weighted cross entropy loss, with instance weighting, sentence type
     ("--encoder transformer --decoder transformer"
      " --num-layers 2 --transformer-attention-heads 2 --transformer-model-size 8 --num-embed 8"
