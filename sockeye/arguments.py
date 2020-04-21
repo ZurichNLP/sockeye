@@ -1171,6 +1171,9 @@ def add_training_args(params):
                               action='store_true',
                               help="Do not perform any actual training, but print statistics about the model"
                               " and mode of operation.")
+    train_params.add_argument('--init-params-only',
+                              action='store_true',
+                              help="Do not perform any actual training, abort after saving initial parameters file.")
 
 
 def add_train_cli_args(params):

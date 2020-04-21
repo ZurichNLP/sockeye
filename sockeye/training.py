@@ -630,7 +630,8 @@ class EarlyStoppingTrainer:
             mxmonitor_pattern: Optional[str] = None,
             mxmonitor_stat_func: Optional[str] = None,
             allow_missing_parameters: bool = False,
-            existing_parameters: Optional[str] = None) -> TrainState:
+            existing_parameters: Optional[str] = None,
+            init_params_only: bool = False) -> TrainState:
         """
         Fits model to data given by train_iter using early-stopping w.r.t data given by val_iter.
         Saves all intermediate and final output to output_folder.
@@ -690,6 +691,10 @@ class EarlyStoppingTrainer:
             self._save_initial_optimizer_states(lr_decay_opt_states_reset)
             self._update_best_optimizer_states(lr_decay_opt_states_reset)
             self.tflogger.log_graph(self.model.current_module.symbol)
+
+            if init_params_only:
+                return
+
             logger.info("Training started.")
 
         metric_train, metric_val, metric_loss = self._create_metrics(metrics, self.model.optimizer, self.model.loss)

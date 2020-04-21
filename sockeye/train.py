@@ -977,7 +977,8 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
                                      mxmonitor_pattern=args.monitor_pattern,
                                      mxmonitor_stat_func=args.monitor_stat_func,
                                      allow_missing_parameters=args.allow_missing_params or model_config.lhuc,
-                                     existing_parameters=args.params)
+                                     existing_parameters=args.params,
+                                     init_params_only=args.init_params_only)
         return training_state
 
 if __name__ == "__main__":
