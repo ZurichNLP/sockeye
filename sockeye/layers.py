@@ -681,6 +681,11 @@ class MultilingualPositionalEmbeddingsLayer(mx.gluon.HybridBlock):
                                                             dropout=0.0,
                                                             prefix="hidden2pos_att_",
                                                             return_probs=True)
+            # context /pos_embed (batch, src_len, encoder_num_hidden)
+            #self.projection_size = 128
+            #self.linear_w = mx.sym.Variable("%slinear_proj_" % self.prefix,
+                                              #shape=(self.projection_size, self.hidden_size))
+            #self.linear_bias = mx.sym.Variable("%slinear_bias" % self.prefix)
             
     def hybrid_forward(self, F,
                 data: mx.sym.Symbol,
@@ -704,7 +709,32 @@ class MultilingualPositionalEmbeddingsLayer(mx.gluon.HybridBlock):
                 
                 context, position_probs = self.hidden2pos_attention(data, pos_embed, source_lengths, None) # position_probs (batch, src_len, pos_len=src_len), context (batch, src_len, encoder_num_hidden)
                 # get weighted embeddings
-                non_en_weighted_embeddings = mx.sym.broadcast_mul(pos_embed, context) # (batch, src_len, encoder_num_hidden)
+                ## variations:
+                # 1 context * pos_embed
+                #non_en_weighted_embeddings = mx.sym.broadcast_mul(pos_embed, context) # (batch, src_len, encoder_num_hidden)
+                
+                # 2 context + pos_embed
+                non_en_weighted_embeddings = mx.sym.broadcast_add(pos_embed, context) # (batch, src_len, encoder_num_hidden)
+                
+                # 3 linear_proj(context) + pos_embed
+                # proj_context: flatten=true (batch, hidden), flatten=false (seq_len, hidden)
+                ##proj_context = mx.sym.FullyConnected(data=context,
+                                              #num_hidden=self.projection_size,
+                                              #weight=self.linear_w,
+                                              #bias=self.linear_bias,
+                                              #flatten=True,
+                                              #name=self.prefix + '_linear_context_transform')
+                # proj_context = mx.sym.expand_dims(proj_context, axis=0)
+                # non_en_weighted_embeddings = proj_context +pos_embed
+                
+                # 4 linear(proj) * pos_embed
+                # non_en_weighted_embeddings = proj_context * pos_embed
+                
+                # 5 dot(linear_proj(context), pos_embed) - ??
+                
+                # 6 with activation
+                #active_positions = mx.sym.Activation(proj_context, act_type='tanh', name=self.prefix + '_tanh_switch')
+                
                 # add weighted positional embeddings to non-English data
                 non_en_data = mx.sym.broadcast_add(data, non_en_weighted_embeddings)
                 
