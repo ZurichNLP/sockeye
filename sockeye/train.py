@@ -830,7 +830,7 @@ def create_optimizer_config(args: argparse.Namespace, source_vocab_sizes: List[i
                                               default_init_xavier_rand_type=args.weight_init_xavier_rand_type,
                                               default_init_xavier_factor_type=args.weight_init_xavier_factor_type,
                                               embed_init_type=args.embed_weight_init,
-                                              embed_init_sigma=source_vocab_sizes[0] ** -0.5,
+                                              embed_init_sigma=args.num_embed[0] ** -0.5,
                                               rnn_init_type=args.rnn_h2h_init,
                                               extra_initializers=extra_initializers)
 
