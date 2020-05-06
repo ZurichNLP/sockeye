@@ -44,7 +44,8 @@ class TransformerConfig(config.Config):
                  dtype: str = C.DTYPE_FP32,
                  return_dec_enc_att_probs: Optional[bool] = False,
                  positional_attention: Optional[bool] = False,
-                 non_en_id: Optional[int] = None) -> None:  # type: ignore
+                 non_en_id: Optional[int] = None,
+                 sublayer_context: Optional[str] = C.SUBLAYER_CONTEXT_ADD) -> None:  # type: ignore
         super().__init__()
         self.model_size = model_size
         self.attention_heads = attention_heads
@@ -65,6 +66,7 @@ class TransformerConfig(config.Config):
         self.return_dec_enc_att_probs = return_dec_enc_att_probs
         self.positional_attention = positional_attention
         self.non_en_id = non_en_id
+        self.sublayer_context = sublayer_context
 
 
 class TransformerEncoderBlock(mx.gluon.HybridBlock):
@@ -109,7 +111,7 @@ class TransformerEncoderBlock(mx.gluon.HybridBlock):
             
             self.positional_embedding_layer = None
             if has_positional_embedding_layer:
-                self.positional_embedding_layer = layers.MultilingualPositionalEmbeddingsLayer(model_size=config.model_size, prefix=C.MULTILINGUAL_POSITIONAL_EMBEDDINGS_LAYER_PREFIX, non_en_id=config.non_en_id)
+                self.positional_embedding_layer = layers.MultilingualPositionalEmbeddingsLayer(model_size=config.model_size, prefix=C.MULTILINGUAL_POSITIONAL_EMBEDDINGS_LAYER_PREFIX, non_en_id=config.non_en_id, sublayer_context=config.sublayer_context)
 
     def hybrid_forward(self, F, data: mx.sym.Symbol, bias: mx.sym.Symbol, pos_embed: Optional[mx.sym.Symbol] = None, source: Optional[mx.sym.Symbol] = None, source_lengths: Optional[mx.sym.Symbol] = None) -> mx.sym.Symbol:
         # self-attention

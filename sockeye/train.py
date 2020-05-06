@@ -412,6 +412,7 @@ def create_encoder_config(args: argparse.Namespace,
             conv_config=config_conv,
             positional_attention=args.multilingual_positional_embeddings,
             non_en_id=non_en_id,
+            sublayer_context=args.sublayer_context,
             lhuc=args.lhuc is not None and (C.LHUC_ENCODER in args.lhuc or C.LHUC_ALL in args.lhuc))
         encoder_num_hidden = encoder_transformer_model_size
     elif args.encoder == C.CONVOLUTION_TYPE:

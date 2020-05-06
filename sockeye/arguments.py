@@ -1181,7 +1181,11 @@ def add_learned_positions_args(params):
                               type=float,
                               default=0.0,
                               help='Scale monotone attention loss on learned positional embeddings by lambda, CE loss will be scaled by (1-lambda). Default: %(default)s.')
-
+    params.add_argument('--sublayer-context',
+                              choices=C.SUBLAYER_CONTEXT_CHOICES,
+                              default=C.SUBLAYER_CONTEXT_ADD,
+                              help='How to combine output of MHA in sublayer with non-English positional embeddings. Default: %(default)s.')
+    
 def add_positional_attention_scoring_args(params):
     params = params.add_argument_group("Parameters for scoring monotonicity with attention on positional embeddings")
     params.add_argument('--positional-attention-monotonicity-scoring',

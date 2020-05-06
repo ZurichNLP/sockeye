@@ -669,9 +669,11 @@ class MultilingualPositionalEmbeddingsLayer(mx.gluon.HybridBlock):
     def __init__(self, 
                 model_size: int, 
                 prefix: str = C.MULTILINGUAL_POSITIONAL_EMBEDDINGS_LAYER_PREFIX,
-                non_en_id: Optional[int] = None) -> None:
+                non_en_id: Optional[int] = None,
+                sublayer_context: Optional[str] = C.SUBLAYER_CONTEXT_ADD) -> None:
         super().__init__(prefix=prefix)
         self.non_en_id = non_en_id
+        self.sublayer_context = sublayer_context
         
         with self.name_scope():
             # TODO: dropout?
@@ -682,11 +684,17 @@ class MultilingualPositionalEmbeddingsLayer(mx.gluon.HybridBlock):
                                                             prefix="hidden2pos_att_",
                                                             return_probs=True)
             # context /pos_embed (batch, src_len, encoder_num_hidden)
-            self.projection_size = 128
+            #self.projection_size = 128
             self.model_size = model_size
-            self.linear_w = mx.sym.Variable("%slinear_proj_weight" % self.prefix,
-                                              shape=(self.model_size, self.model_size))
-            self.linear_bias = mx.sym.Variable("%slinear_bias" % self.prefix)
+            if self.sublayer_context in [C.SUBLAYER_CONTEXT_PROJ_ADD, C.SUBLAYER_CONTEXT_PROJ_MUL]:
+                self.linear_w = mx.sym.Variable("%slinear_proj_weight" % self.prefix,
+                                                shape=(self.model_size, self.model_size))
+                self.linear_bias = mx.sym.Variable("%slinear_bias" % self.prefix)
+                
+            #if self.sublayer_context == C.SUBLAYER_CONTEXT_DOT:
+            #   self.linear_w = mx.sym.Variable("%sdot_linear_proj_weight" % self.prefix,
+                                                #shape=(self.model_size, self.model_size))
+                #self.linear_bias = mx.sym.Variable("%slinear_bias" % self.prefix)
             
     def hybrid_forward(self, F,
                 data: mx.sym.Symbol,
@@ -711,32 +719,52 @@ class MultilingualPositionalEmbeddingsLayer(mx.gluon.HybridBlock):
                 context, position_probs = self.hidden2pos_attention(data, pos_embed, source_lengths, None) # position_probs (batch, src_len, pos_len=src_len), context (batch, src_len, encoder_num_hidden)
                 # get weighted embeddings
                 ## variations:
-                # 1 context * pos_embed
-                #non_en_weighted_embeddings = mx.sym.broadcast_mul(pos_embed, context) # (batch, src_len, encoder_num_hidden)
                 
-                # 2 context + pos_embed
-                #non_en_weighted_embeddings = mx.sym.broadcast_add(pos_embed, context) # (batch, src_len, encoder_num_hidden)
+                # 1 context + pos_embed
+                if self.sublayer_context == C.SUBLAYER_CONTEXT_ADD:
+                    non_en_weighted_embeddings = mx.sym.broadcast_add(pos_embed, context) # (batch, src_len, encoder_num_hidden)
+                
+                # 2 context * pos_embed
+                elif self.sublayer_context == C.SUBLAYER_CONTEXT_MUL:
+                    non_en_weighted_embeddings = mx.sym.broadcast_mul(pos_embed, context) # (batch, src_len, encoder_num_hidden)
                 
                 # 3 linear_proj(context) + pos_embed
                 # proj_context: flatten=true (batch, hidden), flatten=false (seq_len, proj size)
-                context = mx.sym.reshape(data=context ,shape=(-3,-1))
-                proj_context = mx.sym.FullyConnected(data=context,
-                                              num_hidden=self.model_size,
-                                              weight=self.linear_w,
-                                              bias=self.linear_bias,
-                                              flatten=True,
-                                              name=self.prefix + '_linear_context_transform')
-                #proj_context = mx.sym.expand_dims(proj_context, axis=0)
-                proj_context = mx.sym.reshape_like(lhs=proj_context, rhs=data)
-                non_en_weighted_embeddings = proj_context +pos_embed
+                elif self.sublayer_context == C.SUBLAYER_CONTEXT_PROJ_ADD:
+                    context = mx.sym.reshape(data=context ,shape=(-3,-1))
+                    proj_context = mx.sym.FullyConnected(data=context,
+                                                num_hidden=self.model_size,
+                                                weight=self.linear_w,
+                                                bias=self.linear_bias,
+                                                flatten=True,
+                                                name=self.prefix + '_linear_context_transform')
+                    proj_context = mx.sym.reshape_like(lhs=proj_context, rhs=data)
+                    non_en_weighted_embeddings = proj_context + pos_embed
                 
                 # 4 linear(proj) * pos_embed
-                # non_en_weighted_embeddings = proj_context * pos_embed
+                elif self.sublayer_context == C.SUBLAYER_CONTEXT_PROJ_MUL:
+                    context = mx.sym.reshape(data=context ,shape=(-3,-1))
+                    proj_context = mx.sym.FullyConnected(data=context,
+                                                num_hidden=self.model_size,
+                                                weight=self.linear_w,
+                                                bias=self.linear_bias,
+                                                flatten=True,
+                                                name=self.prefix + '_linear_context_transform')
+                    proj_context = mx.sym.reshape_like(lhs=proj_context, rhs=data)
+                    non_en_weighted_embeddings = proj_context * pos_embed
                 
                 # 5 dot(linear_proj(context), pos_embed) - ??
+                # elif self.sublayer_context == C.SUBLAYER_CONTEXT_DOT:
+                #   dot_context = mx.sym.batch_dot(lhs=context, rhs=pos_embed, transpose_a=True) # (batch, model_size, model_size)
+                
+                
+                
+                
                 
                 # 6 with activation
-                #active_positions = mx.sym.Activation(proj_context, act_type='tanh', name=self.prefix + '_tanh_switch')
+                elif self.sublayer_context == C.SUBLAYER_CONTEXT_ACT_ADD:
+                    active_positions = mx.sym.Activation(context, act_type='tanh', name=self.prefix + '_tanh_switch')
+                    non_en_weighted_embeddings = mx.sym.broadcast_add(pos_embed, context) # (batch, src_len, encoder_num_hidden)
                 
                 # add weighted positional embeddings to non-English data
                 non_en_data = mx.sym.broadcast_add(data, non_en_weighted_embeddings)

@@ -75,6 +75,18 @@ IMAGE_PRETRAIN_TYPE = "image-pretrain-cnn"
 # available encoders
 ENCODERS = [RNN_NAME, RNN_WITH_CONV_EMBED_NAME, TRANSFORMER_TYPE, TRANSFORMER_WITH_CONV_EMBED_TYPE, CONVOLUTION_TYPE, IMAGE_PRETRAIN_TYPE]
 
+# additional sublayer in last encoder layer for multilingual models with learned positions: How to combine the output of the MHA with the positional embeddings in non-English max_samples
+SUBLAYER_CONTEXT_ADD="context-add" # context + pos_embed
+SUBLAYER_CONTEXT_MUL="context-mul" # context * pos_embed
+SUBLAYER_CONTEXT_PROJ_ADD="context-proj-add" # linear_proj(context) + pos_embed
+SUBLAYER_CONTEXT_PROJ_MUL="context-proj-mul" # linear_proj(context) + pos_embed
+SUBLAYER_CONTEXT_DOT="context-dot" # context dot_prod pos_embed
+SUBLAYER_CONTEXT_ACT_ADD="context-act-add" # context + pos_embed + activation
+
+SUBLAYER_CONTEXT_CHOICES=[SUBLAYER_CONTEXT_ADD, SUBLAYER_CONTEXT_MUL, SUBLAYER_CONTEXT_PROJ_ADD, SUBLAYER_CONTEXT_PROJ_MUL, SUBLAYER_CONTEXT_DOT, SUBLAYER_CONTEXT_ACT_ADD]
+
+
+
 # available decoder
 DECODERS = [RNN_NAME, TRANSFORMER_TYPE, CONVOLUTION_TYPE]
 
