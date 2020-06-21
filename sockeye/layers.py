@@ -761,10 +761,11 @@ class MultilingualPositionalEmbeddingsLayer(mx.gluon.HybridBlock):
                 
                 # 5 with activation
                 elif self.sublayer_context == C.SUBLAYER_CONTEXT_ACT_ADD:
-                    active_positions = mx.sym.Activation(context, act_type='tanh', name=self.prefix + '_tanh_switch')
+                    active_positions = mx.sym.Activation(data=context, act_type="sigmoid")
+                    
                     non_en_weighted_embeddings = mx.sym.broadcast_add(pos_embed, active_positions) # (batch, src_len, encoder_num_hidden)
                     # active original positional embeddings for English data
-                    en_active_positions = mx.sym.Activation(pos_embed, act_type='tanh', name=self.prefix + '_tanh_switch')
+                    en_active_positions = mx.sym.Activation(data=pos_embed, act_type="sigmoid")
                     en_pos_embed =  mx.sym.broadcast_add(pos_embed, en_active_positions)
                 
                 # add weighted positional embeddings to non-English data
