@@ -723,14 +723,18 @@ class MultilingualPositionalEmbeddingsLayer(mx.gluon.HybridBlock):
                 # 1 context + pos_embed
                 if self.sublayer_context == C.SUBLAYER_CONTEXT_ADD:
                     non_en_weighted_embeddings = mx.sym.broadcast_add(pos_embed, context) # (batch, src_len, encoder_num_hidden)
+                    en_pos_embed = pos_embed
                 
                 # 2 context * pos_embed
                 elif self.sublayer_context == C.SUBLAYER_CONTEXT_MUL:
                     non_en_weighted_embeddings = mx.sym.broadcast_mul(pos_embed, context) # (batch, src_len, encoder_num_hidden)
+                    en_pos_embed = pos_embed
                 
                 # 3 linear_proj(context) + pos_embed
                 # proj_context: flatten=true (batch, hidden), flatten=false (seq_len, proj size)
                 elif self.sublayer_context == C.SUBLAYER_CONTEXT_PROJ_ADD:
+                    logger.warn("Projection not implemented for English positional embeddings")
+                    raise NotImplementedError
                     context = mx.sym.reshape(data=context ,shape=(-3,-1))
                     proj_context = mx.sym.FullyConnected(data=context,
                                                 num_hidden=self.model_size,
@@ -743,6 +747,8 @@ class MultilingualPositionalEmbeddingsLayer(mx.gluon.HybridBlock):
                 
                 # 4 linear(proj) * pos_embed
                 elif self.sublayer_context == C.SUBLAYER_CONTEXT_PROJ_MUL:
+                    logger.warn("Projection not implemented for English positional embeddings")
+                    raise NotImplementedError
                     context = mx.sym.reshape(data=context ,shape=(-3,-1))
                     proj_context = mx.sym.FullyConnected(data=context,
                                                 num_hidden=self.model_size,
@@ -753,21 +759,17 @@ class MultilingualPositionalEmbeddingsLayer(mx.gluon.HybridBlock):
                     proj_context = mx.sym.reshape_like(lhs=proj_context, rhs=data)
                     non_en_weighted_embeddings = proj_context * pos_embed
                 
-                # 5 dot(linear_proj(context), pos_embed) - ??
-                # elif self.sublayer_context == C.SUBLAYER_CONTEXT_DOT:
-                #   dot_context = mx.sym.batch_dot(lhs=context, rhs=pos_embed, transpose_a=True) # (batch, model_size, model_size)
-                
-                
-                
-                
-                
-                # 6 with activation
+                # 5 with activation
                 elif self.sublayer_context == C.SUBLAYER_CONTEXT_ACT_ADD:
                     active_positions = mx.sym.Activation(context, act_type='tanh', name=self.prefix + '_tanh_switch')
-                    non_en_weighted_embeddings = mx.sym.broadcast_add(pos_embed, context) # (batch, src_len, encoder_num_hidden)
+                    non_en_weighted_embeddings = mx.sym.broadcast_add(pos_embed, active_positions) # (batch, src_len, encoder_num_hidden)
+                    # active original positional embeddings for English data
+                    en_active_positions = mx.sym.Activation(pos_embed, act_type='tanh', name=self.prefix + '_tanh_switch')
+                    en_pos_embed =  mx.sym.broadcast_add(pos_embed, en_active_positions)
                 
                 # add weighted positional embeddings to non-English data
                 non_en_data = mx.sym.broadcast_add(data, non_en_weighted_embeddings)
+                en_data  = mx.sym.broadcast_add(data, en_pos_embed)
                 
                 ## get mask for non-English sentences (batch, 1, 1) where non-English sentences =1, English = 0
                 non_en_mask = (source == self.non_en_id) # shape (batch, src_len, 1), non_en_id = id of <2en>
@@ -777,8 +779,6 @@ class MultilingualPositionalEmbeddingsLayer(mx.gluon.HybridBlock):
 
                 # English mask: 1 for en sentences, 0 for others -> inverse of mask
                 en_mask = (non_en_mask == 0)
-                # add original positional embeddings to English data
-                en_data = mx.sym.broadcast_add(data, pos_embed)
                 en_data = mx.sym.broadcast_mul(en_mask, en_data) # data + positions for English sentences, 0 for non-English sentences, # (batch, src_len, encoder_num_hidden)
                 data = mx.sym.broadcast_add(en_data, non_en_data) 
                 return data, position_probs
