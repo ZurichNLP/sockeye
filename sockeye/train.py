@@ -633,7 +633,8 @@ def create_model_config(args: argparse.Namespace,
                         max_seq_len_source: int,
                         max_seq_len_target: int,
                         config_data: data_io.DataConfig, 
-                        non_en_id: Optional[int] = None) -> model.ModelConfig:
+                        non_en_id: Optional[int] = None,
+                        en_trg_id: Optional[int] = None) -> model.ModelConfig:
     """
     Create a ModelConfig from the argument given in the command line.
 
@@ -706,7 +707,9 @@ def create_model_config(args: argparse.Namespace,
         multilingual_positional_config_loss = loss.LossConfig(name='multilingual-positional-attention-loss',
                                   vocab_size=None,
                                   normalization_type=None,
-                                  label_smoothing=None)
+                                  label_smoothing=None,
+                                  en_trg_id=en_trg_id, 
+                                  non_en_id=non_en_id)
 
     if args.length_task is not None:
         config_length_task = layers.LengthRatioConfig(num_layers=args.length_task_layers, weight=args.length_task_weight)
@@ -927,6 +930,7 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
         non_en_id = None
         if args.multilingual_positional_embeddings:
             non_en_id = source_vocabs[0][C.NON_EN_SYMBOL]
+            en_trg_id = source_vocabs[0][C.EN_TRG_ID]
 
         # Dump the vocabularies if we're just starting up
         if not resume_training:
@@ -943,7 +947,8 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
                                            source_vocab_sizes=source_vocab_sizes, target_vocab_size=target_vocab_size,
                                            max_seq_len_source=max_seq_len_source, max_seq_len_target=max_seq_len_target,
                                            config_data=config_data,
-                                           non_en_id=non_en_id)
+                                           non_en_id=non_en_id,
+                                           en_trg_id=en_trg_id)
         model_config.freeze()
 
         training_model = create_training_model(config=model_config,

@@ -706,7 +706,7 @@ class MultilingualPositionalEmbeddingsLayer(mx.gluon.HybridBlock):
                 Weigh learned positional embeddings, add to non-English sentences, add original positional embeddings to English sentences.
                 :param data: Encoder hidden states of last sub layer, before FF (output of self attention after residual + layer norm). Symbol of shape (batch, src_len, encoder_num_hidden).
                 :param pos_embed: Original learned positional embeddings. Symbol of shape (1, src_len, encoder_num_hidden).
-                :param source: source sentences. Symbol of shape(batch, src_len, num_factors).
+                :param source: source sentences. Symbol of shape(batch, src_len).
                 :param source_lengths: Length of source sentences in batch without padding. Symbol of shape(batch, ).
                 :return: Symbol of shape (batch, queries_max_length, num_hidden).
                 """
@@ -771,11 +771,12 @@ class MultilingualPositionalEmbeddingsLayer(mx.gluon.HybridBlock):
                 # add weighted positional embeddings to non-English data
                 non_en_data = mx.sym.broadcast_add(data, non_en_weighted_embeddings)
                 en_data  = mx.sym.broadcast_add(data, en_pos_embed)
-                
+            
                 ## get mask for non-English sentences (batch, 1, 1) where non-English sentences =1, English = 0
-                non_en_mask = (source == self.non_en_id) # shape (batch, src_len, 1), non_en_id = id of <2en>
+                non_en_mask = (source == self.non_en_id) # shape (batch, src_len), non_en_id = id of <non_en>
                 non_en_mask = mx.sym.sum(non_en_mask, axis=1) # (batch, 1) 
                 non_en_mask = mx.sym.expand_dims(non_en_mask, axis=1) # (batch, 1,1)
+                non_en_mask = mx.sym.expand_dims(non_en_mask, axis=1) 
                 non_en_data = mx.sym.broadcast_mul(non_en_mask, non_en_data) # data + weighted positions for non-English sentences, 0 for English sentences, # (batch, src_len, encoder_num_hidden)
 
                 # English mask: 1 for en sentences, 0 for others -> inverse of mask
