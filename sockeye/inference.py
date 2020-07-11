@@ -184,7 +184,7 @@ class InferenceModel(model.SockeyeModel):
                                                            source_embed_length,
                                                            source_embed_seq_len,
                                                            get_pos_embed=True,
-                                                           source=source)
+                                                           source=source_words)
 
             # initial decoder states
             decoder_init_states = self.decoder.init_states(source_encoded,
