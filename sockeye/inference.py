@@ -170,14 +170,15 @@ class InferenceModel(model.SockeyeModel):
             # source_encoded: (source_encoded_length, batch_size, encoder_depth)
             (source_encoded,
              source_encoded_length,
-             source_encoded_seq_len) = self.encoder.encode(source_embed,
+             source_encoded_seq_len,
+             source_pos_embed) = self.encoder.encode(source_embed,
                                                            source_embed_length,
                                                            source_embed_seq_len)
 
             # initial decoder states
             decoder_init_states = self.decoder.init_states(source_encoded,
                                                            source_encoded_length,
-                                                           source_encoded_seq_len)
+                                                           source_encoded_seq_len, source_pos_embed)
 
             data_names = [C.SOURCE_NAME]
             label_names = []  # type: List[str]
@@ -214,6 +215,7 @@ class InferenceModel(model.SockeyeModel):
             target_prev = mx.sym.Variable(C.TARGET_NAME)
             states = self.decoder.state_variables(decode_step)
             state_names = [state.name for state in states]
+            source_pos_embed = states[2]
 
             # embedding for previous word
             # (batch_size, num_embed)
@@ -241,10 +243,12 @@ class InferenceModel(model.SockeyeModel):
                     outputs = mx.sym.softmax(data=logits, name=C.SOFTMAX_NAME)
                 else:
 #                    target_embed_prev = mx.sym.Custom(op_type="PrintValue", data=target_embed_prev, print_name="TARG")
-                    num_attention_heads=None
-                    if self.config.pointer_net_type == C.POINTER_NET_TRANSFORMER:
+                    
+                    if self.config.pointer_net_layer == C.POINTER_NET_LAYER_EMBED:
+                        outputs = self.output_layer(target_decoded, embed=source_pos_embed, source_lengths=utils.compute_lengths(source_pos_embed), target_embed=target_embed_prev)
+                    elif self.config.pointer_net_type == C.POINTER_NET_TRANSFORMER:
                         num_attention_heads=self.config.config_decoder.attention_heads
-                    outputs = self.output_layer(target_decoded, attention=attention_probs,
+                        outputs = self.output_layer(target_decoded, attention=attention_probs,
                                                 context=attention_context, target_embed=target_embed_prev, num_attention_heads=num_attention_heads, is_inference=True)
 
             data_names = [C.TARGET_NAME] + state_names
@@ -1639,30 +1643,6 @@ class Translator:
                 # All rows are now active (after special treatment of start state at t=1)
                 inactive[:] = 0
 
-            # collect coverage penalty -> OpenNMT-py onmt/translate/beam_search.py
-            if self.coverage_penalty:
-                # attention_scores (batch_size * beam_size * attention_heads, src_len)
-                # scores (batch *beam, target_vocab(+src_len)), scores_accumulated: (batch *beam, 1)
-                # best_hyp_indices (batch*beam)
-                
-                
-                #avg_attention_scores = attention_scores.reshape(shape=(-4, self.batch_size * self.beam_size, -1, 0))
-                #avg_attention_scores = avg_attention_scores.mean(axis=1) # (batch*beam, src_len)
-                
-                current_attention = avg_attention_scores.take(axis=0, indices=best_hyp_indices)
-                if t==1:
-                    self._coverage = current_attention # shape (batch *beam, src_len)
-                    self._prev_penalty = mx.nd.zeros(shape=(self.batch_size * self.beam_size, 1), ctx=self.context) 
-                else:
-                    self._coverage = self._coverage.take(axis=0, indices=best_hyp_indices)
-                    self._coverage += current_attention
-                    self._prev_penalty = self._get_coverage_penalty(self._coverage, self.coverage_penalty_beta)
-                    
-            if self.coverage_penalty and not self.stepwise_coverage_penalty:
-                # TODO: apply penalty as avg of penalty per head?
-                cov_pen = self._get_coverage_penalty(self._coverage, self.coverage_penalty_beta)
-                scores_accumulated += cov_pen
-                
             # Map from restricted to full vocab ids if needed
             if self.restrict_lexicon:
                 best_word_indices = vocab_slice_ids.take(best_word_indices)
@@ -1678,9 +1658,10 @@ class Translator:
                 src_word_probs = mx.nd.slice(scores, begin=(0, target_vocab_size), end=(batch_beam, vocab_size_src_len), step=(1,1))
                 # get indices + values of best source word for each beam
                 best_src_hyp_indices, best_src_word_indices, src_scores_accumulated  = self._topk(src_word_probs)
+                
+                
                 # shift best_src_word_indices by target_vocab_size to have the actual indices
                 best_src_word_indices += target_vocab_size
-                
                 ##replace best_word_indices + scores_accumulated
                 mask_unkown = (best_word_indices == self.unk_id).astype(dtype=best_src_word_indices.dtype) # dtype=int32
                 best_src_word_to_replace = best_src_word_indices * mask_unkown # best_src_word_to_replace: id for words unk_id will be replaced with, 0 otherwise
@@ -1688,11 +1669,13 @@ class Translator:
                 for index in best_src_word_to_replace.asnumpy():
                     if not index == 0:
                         index -= target_vocab_size 
-                        logger.debug("Replacing <unk> with {}".format(self.vocab_source_inv[index]))
+                        logger.debug("Replacing <unk> with pointed position {}".format(index))
                
                 # inverse masks: unk_id set to 0, rest to 1 (needed to set orginal values of unk_id to 0, then add new ids + scores from src
                 mask_unkown_inv = (mask_unkown == 0)
+                #print("mask inv ", mask_unkown_inv)
                 best_word_indices = best_word_indices * mask_unkown_inv
+                #print("best word indices masked unk ", best_word_indices)
                 best_word_indices += best_src_word_to_replace
                 
                 # TODO: replace scores of <unk> with scores of source word (changes beam search)?
@@ -1703,7 +1686,26 @@ class Translator:
                 #scores_accumulated += src_scores_accumulated_to_replace
                 
 
-               
+            # collect coverage penalty -> OpenNMT-py onmt/translate/beam_search.py
+            if self.coverage_penalty:
+                # attention_scores (batch_size * beam_size * attention_heads, src_len)
+                # scores (batch *beam, target_vocab(+src_len)), scores_accumulated: (batch *beam, 1)
+                # best_hyp_indices (batch*beam)
+                
+                current_attention = avg_attention_scores.take(axis=0, indices=best_hyp_indices)
+                if t==1:
+                    self._coverage = current_attention # shape (batch *beam, src_len)
+                    self._prev_penalty = mx.nd.zeros(shape=(self.batch_size * self.beam_size, 1), ctx=self.context) 
+                else:
+                    self._coverage = self._coverage.take(axis=0, indices=best_hyp_indices)
+                    self._coverage += current_attention
+                    self._prev_penalty = self._get_coverage_penalty(self._coverage, self.coverage_penalty_beta)
+                    
+            if self.coverage_penalty and not self.stepwise_coverage_penalty:
+                # TODO: apply penalty as avg of penalty per head?
+                cov_pen = self._get_coverage_penalty(self._coverage, self.coverage_penalty_beta)
+                scores_accumulated += cov_pen
+                   
            
             # (4) Reorder fixed-size beam data according to best_hyp_indices (ascending)
             finished, lengths, attention_scores = self._sort_by_index.forward(best_hyp_indices,

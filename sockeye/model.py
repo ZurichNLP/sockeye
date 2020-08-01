@@ -132,6 +132,7 @@ class SockeyeModel:
         # output layer
         if self.config.use_pointer_nets:
             assert self.config.config_loss.name == C.POINTER_NET_CROSS_ENTROPY
+            
             if self.config.pointer_net_layer == C.POINTER_NET_LAYER_ONMT:
                 self.output_layer = layers.onmtPointerOutputLayer(hidden_size=self.decoder.get_num_hidden(),
                                                           vocab_size=self.config.vocab_target_size,
@@ -140,12 +141,25 @@ class SockeyeModel:
                                                           pointer_num_hidden=self.config.pointer_num_hidden,
                                                           pointer_type=self.config.pointer_net_type,
                                                           prefix=self.prefix + C.DEFAULT_OUTPUT_LAYER_PREFIX)
-            if self.config.pointer_net_layer == C.POINTER_NET_LAYER_SIMPLE:
+                
+            elif self.config.pointer_net_layer == C.POINTER_NET_LAYER_SIMPLE:
                 self.output_layer = layers.SimplePointerOutputLayer(hidden_size=self.decoder.get_num_hidden(),
                                                           target_embed_size=self.config.config_embed_target.num_embed,
                                                           vocab_size=self.config.vocab_target_size,
                                                           weight=out_weight_target,
                                                           weight_normalization=self.config.weight_normalization,
+                                                          prefix=self.prefix + C.DEFAULT_OUTPUT_LAYER_PREFIX,
+                                                          pointer_num_hidden=self.config.pointer_num_hidden,
+                                                          pointer_type=self.config.pointer_net_type)
+                
+            elif self.config.pointer_net_layer == C.POINTER_NET_LAYER_EMBED:
+                self.output_layer = layers.EmbedPointerOutputLayer(hidden_size=self.decoder.get_num_hidden(),
+                                                          target_embed_size=self.config.config_embed_target.num_embed, 
+                                                          vocab_size=self.config.vocab_target_size,
+                                                          weight=out_weight_target,
+                                                          weight_normalization=self.config.weight_normalization,
+                                                          model_size=self.config.config_decoder.model_size,
+                                                          num_heads=self.config.config_decoder.attention_heads,
                                                           prefix=self.prefix + C.DEFAULT_OUTPUT_LAYER_PREFIX,
                                                           pointer_num_hidden=self.config.pointer_num_hidden,
                                                           pointer_type=self.config.pointer_net_type)

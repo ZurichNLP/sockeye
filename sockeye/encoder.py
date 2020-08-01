@@ -730,9 +730,12 @@ class EncoderSequence(Encoder):
         :param seq_len: Maximum sequence length.
         :return: Encoded versions of input data (data, data_length, seq_len).
         """
-        for encoder in self.encoders:
+        embed_w_positions=None
+        for i,encoder in enumerate(self.encoders):
             data, data_length, seq_len = encoder.encode(data, data_length, seq_len)
-        return data, data_length, seq_len
+            if i==0:
+                embed_w_positions = data
+        return data, data_length, seq_len, embed_w_positions
 
     def get_num_hidden(self) -> int:
         """

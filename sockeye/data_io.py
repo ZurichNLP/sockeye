@@ -267,6 +267,17 @@ def are_token_parallel(sequences: Sequence[Sized]) -> bool:
         return True
     return all(len(s) == len(sequences[0]) for s in sequences)
 
+#def get_src_map(data: np.array, vocab_size: int, pad_id: int, eos_id:int):
+    #(num_samples, src_size, num_factors) = data.shape
+    #print(data.shape)
+    #alignment = mx.nd.zeros(shape=(src_size, num_samples, vocab_size+1 ))
+    
+    #for i, sent in enumerate(data):
+        #for j, t in enumerate(sent):
+            #alignment[j, i, t] = 1
+
+    #return alignment
+
 
 class DataStatisticsAccumulator:
 
@@ -432,14 +443,18 @@ class RawParallelDatasetLoader:
                  eos_id: int,
                  pad_id: int,
                  target_vocab_size: int,
+                 source_vocab_size: Optional[int] = None,
                  aligner: Optional[align.Aligner] = None,
+                 need_src_map: Optional[bool] = False,
                  dtype: str = 'float32') -> None:
         self.buckets = buckets
         self.eos_id = eos_id
         self.pad_id = pad_id
         self.dtype = dtype
         self.target_vocab_size = target_vocab_size
+        self.source_vocab_size = source_vocab_size
         self.aligner = aligner
+        self.need_src_map = need_src_map
 
     def load(self,
              source_iterables: Sequence[Iterable],
@@ -494,12 +509,15 @@ class RawParallelDatasetLoader:
             data_label[buck_index][sample_index, :target_len] = labels
 
             bucket_sample_index[buck_index] += 1
-
+        
+        #src_maps = []
         for i in range(len(data_source)):
             data_source[i] = mx.nd.array(data_source[i], dtype=self.dtype)
             data_target[i] = mx.nd.array(data_target[i], dtype=self.dtype)
             data_label[i] = mx.nd.array(data_label[i], dtype=self.dtype)
-
+            
+            #if self.need_src_map and data_source[i].shape[0] > 0:
+                #src_map = get_src_map(data_source[i], self.source_vocab_size, self.pad_id, self.eos_id)
         if num_tokens_source > 0 and num_tokens_target > 0:
             logger.info("Created bucketed parallel data set. Introduced padding: source=%.1f%% target=%.1f%%)",
                         num_pad_source / num_tokens_source * 100,
@@ -786,7 +804,8 @@ def get_training_data_iters(sources: List[str],
                             max_seq_len_target: int,
                             bucketing: bool,
                             bucket_width: int,
-                            aligner: Optional[align.Aligner] = None) -> Tuple['BaseParallelSampleIter',
+                            aligner: Optional[align.Aligner] = None,
+                            need_src_map: Optional[bool] = False) -> Tuple['BaseParallelSampleIter',
                                                                               'BaseParallelSampleIter',
                                                                               'DataConfig', 'DataInfo']:
     """
@@ -842,7 +861,9 @@ def get_training_data_iters(sources: List[str],
                                            eos_id=target_vocab[C.EOS_SYMBOL],
                                            pad_id=C.PAD_ID,
                                            target_vocab_size=len(target_vocab),
-                                           aligner=aligner)
+                                           source_vocab_size=len(source_vocabs[0]),
+                                           aligner=aligner,
+                                           need_src_map=need_src_map)
 
     training_data = data_loader.load(sources_sentences, target_sentences,
                                      data_statistics.num_sents_per_bucket).fill_up(bucket_batch_sizes,

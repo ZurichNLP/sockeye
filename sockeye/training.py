@@ -130,7 +130,8 @@ class TrainingModel(model.SockeyeModel):
             # source_encoded: (batch_size, source_encoded_length, encoder_depth)
             (source_encoded,
              source_encoded_length,
-             source_encoded_seq_len) = self.encoder.encode(source_embed,
+             source_encoded_seq_len,
+             source_pos_embed) = self.encoder.encode(source_embed,
                                                            source_embed_length,
                                                            source_embed_seq_len)
 
@@ -157,28 +158,34 @@ class TrainingModel(model.SockeyeModel):
                 loss_output = self.model_loss.get_loss(logits, labels)
             else:
                 if self.config.pointer_net_type == C.POINTER_NET_RNN or self.config.pointer_net_type == C.POINTER_NET_TRANSFORMER:
-                    ## RESHAPING
-                    # target_decoded: (batch_size * target_seq_len, rnn_num_hidden)
-                    target_decoded = mx.sym.reshape(data=target_decoded, shape=(-3, 0))
-                    # target_embed: (batch, targ max len, embedding) -> (batch * targ max len, embedding)
-                    target_embed = mx.sym.reshape(data=target_embed, shape=(-3, 0))
+                    
+                    if self.config.pointer_net_layer == C.POINTER_NET_LAYER_EMBED:
+                        target_embed = mx.sym.reshape(data=target_embed, shape=(-3, 0))
+                        softmax_probs = self.output_layer(target_decoded, embed=source_pos_embed, source_lengths=source_embed_length, target_embed=target_embed)
+                    
+                    else:
+                        ## RESHAPING
+                        # target_decoded: (batch_size * target_seq_len, rnn_num_hidden)
+                        target_decoded = mx.sym.reshape(data=target_decoded, shape=(-3, 0))
+                        # target_embed: (batch, targ max len, embedding) -> (batch * targ max len, embedding)
+                        target_embed = mx.sym.reshape(data=target_embed, shape=(-3, 0))
 
-                    context, attention = target_decoded_and_attention[1:]
+                        context, attention = target_decoded_and_attention[1:]
 
-                    # context: (batch_size * trg_seq_len, encoder_num_hidden), attention: (batch_size * trg_seq_len, source_length)
-                    # transformer: (batch_size * trg_seq_len, model_size), attention: (batch_size *num_attention_heads, trg_seq_len ,source_length)
-                    context = mx.sym.reshape(data=context, shape=(-3, 0))
-                    if self.config.pointer_net_type == C.POINTER_NET_RNN:
-                        attention = mx.sym.reshape(data=attention, shape=(-3, 0))
+                        # context: (batch_size * trg_seq_len, encoder_num_hidden), attention: (batch_size * trg_seq_len, source_length)
+                        # transformer: (batch_size * trg_seq_len, model_size), attention: (batch_size *num_attention_heads, trg_seq_len ,source_length)
+                        context = mx.sym.reshape(data=context, shape=(-3, 0))
+                        if self.config.pointer_net_type == C.POINTER_NET_RNN:
+                            attention = mx.sym.reshape(data=attention, shape=(-3, 0))
 
-                    # softmax_probs: (batch_size * target_seq_len, target_vocab_size+src_seq_len)
-                    num_attention_heads=None
-                    if self.config.pointer_net_type == C.POINTER_NET_TRANSFORMER:
-                        num_attention_heads=self.config.config_decoder.attention_heads
-                    softmax_probs = self.output_layer(target_decoded, attention=attention, context=context, target_embed=target_embed, num_attention_heads=num_attention_heads)
+                        # softmax_probs: (batch_size * target_seq_len, target_vocab_size+src_seq_len)
+                        num_attention_heads=None
+                        if self.config.pointer_net_type == C.POINTER_NET_TRANSFORMER:
+                            num_attention_heads=self.config.config_decoder.attention_heads
+                        
+                        softmax_probs = self.output_layer(target_decoded, attention=attention, context=context, target_embed=target_embed, num_attention_heads=num_attention_heads)
                     
                 loss_output = self.model_loss.get_loss(softmax_probs, labels)
-                
 
             return mx.sym.Group(loss_output), data_names, label_names
 
@@ -707,7 +714,7 @@ class EarlyStoppingTrainer:
         # Forward & Backward
         ####################
         model.run_forward_backward(batch, metric_train)
-
+ 
         # If using an extended optimizer, provide extra state information about the current batch
         optimizer = model.optimizer
         if metric_loss is not None: #and isinstance(optimizer, SockeyeOptimizer):

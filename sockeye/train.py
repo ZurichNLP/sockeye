@@ -353,7 +353,8 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
             max_seq_len_target=max_seq_len_target,
             bucketing=not args.no_bucketing,
             bucket_width=args.bucket_width,
-            aligner=aligner)
+            aligner=aligner,
+            need_src_map=(args.pointer_nets_layer == C.POINTER_NET_LAYER_ONMT))
 
         data_info_fname = os.path.join(output_folder, C.DATA_INFO)
         logger.info("Writing data config to '%s'", data_info_fname)

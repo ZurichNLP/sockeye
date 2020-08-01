@@ -299,7 +299,7 @@ class TransformerDecoder(Decoder):
         :return: logit inputs, attention context, attention probabilities, next decoder states.
         """
         # for step > 1, states contains source_encoded, source_encoded_lengths, and cache tensors.
-        source_encoded, source_encoded_lengths, *cache = states  # type: ignore
+        source_encoded, source_encoded_lengths, source_pos_embed, *cache = states  # type: ignore
 
         # symbolic indices of the previous word
         indices = mx.sym.arange(start=step - 1, stop=step, step=1, name='indices')
@@ -322,7 +322,7 @@ class TransformerDecoder(Decoder):
         target_bias = transformer.get_autoregressive_bias(step, name="%sbias" % self.prefix)
         target_bias = mx.sym.slice_axis(target_bias, axis=1, begin=-1, end=step)
 
-        new_states = [source_encoded, source_encoded_lengths]
+        new_states = [source_encoded, source_encoded_lengths, source_pos_embed]
         layer_caches = self._get_cache_per_layer(cast(List[mx.sym.Symbol], cache))
         for layer, layer_cache in zip(self.layers, layer_caches):
             target, attention_probs, attention_context = layer(target=target,
@@ -379,7 +379,8 @@ class TransformerDecoder(Decoder):
     def init_states(self,
                     source_encoded: mx.sym.Symbol,
                     source_encoded_lengths: mx.sym.Symbol,
-                    source_encoded_max_length: int) -> List[mx.sym.Symbol]:
+                    source_encoded_max_length: int,
+                    source_pos_embed: mx.sym.Symbol) -> List[mx.sym.Symbol]:
         """
         Returns a list of symbolic states that represent the initial states of this decoder.
         Used for inference.
@@ -389,7 +390,7 @@ class TransformerDecoder(Decoder):
         :param source_encoded_max_length: Size of encoder time dimension.
         :return: List of symbolic initial states.
         """
-        return [source_encoded, source_encoded_lengths]
+        return [source_encoded, source_encoded_lengths, source_pos_embed]
 
     def state_variables(self, target_max_length: int) -> List[mx.sym.Symbol]:
         """
@@ -399,7 +400,8 @@ class TransformerDecoder(Decoder):
         :return: List of symbolic variables.
         """
         variables = [mx.sym.Variable(C.SOURCE_ENCODED_NAME),
-                     mx.sym.Variable(C.SOURCE_LENGTH_NAME)]
+                     mx.sym.Variable(C.SOURCE_LENGTH_NAME),
+                     mx.sym.Variable("source_pos_embed")]
         if target_max_length > 1:  # no cache for initial decoder step
             for l in range(len(self.layers)):
                 variables.append(mx.sym.Variable('cache_l%d_k' % l))
@@ -424,7 +426,10 @@ class TransformerDecoder(Decoder):
         shapes = [mx.io.DataDesc(C.SOURCE_ENCODED_NAME,
                                  (batch_size, source_encoded_max_length, source_encoded_depth),
                                  layout=C.BATCH_MAJOR),
-                  mx.io.DataDesc(C.SOURCE_LENGTH_NAME, (batch_size,), layout="N")]
+                  mx.io.DataDesc(C.SOURCE_LENGTH_NAME, (batch_size,), layout="N"),
+                  mx.io.DataDesc("source_pos_embed",
+                                 (batch_size, source_encoded_max_length, source_encoded_depth),
+                                 layout=C.BATCH_MAJOR)]
 
         if target_max_length > 1:  # no cache for initial decoder step
             for l in range(len(self.layers)):
