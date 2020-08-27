@@ -73,7 +73,8 @@ class TrainingModel(model.SockeyeModel):
                  gradient_accumulation: bool = False,
                  fixed_param_names: Optional[List[str]] = None,
                  fixed_param_strategy: Optional[str] = None,
-                 positional_attention_loss_lambda: Optional[float] = 0.0) -> None:
+                 positional_attention_loss_lambda: Optional[float] = 0.0,
+                 positional_attention_loss_margin: Optional[float] = 1.0) -> None:
         super().__init__(config)
         self.context = context
         self.output_dir = output_dir
@@ -83,6 +84,7 @@ class TrainingModel(model.SockeyeModel):
         self._gradient_compression_params = gradient_compression_params
         self._gradient_accumulation = gradient_accumulation
         self._positional_attention_loss_lambda = positional_attention_loss_lambda
+        self._positional_attention_loss_margin = positional_attention_loss_margin
         self._initialize(provide_data, provide_label, default_bucket_key)
         self._monitor = None  # type: Optional[mx.monitor.Monitor]
 
@@ -196,7 +198,6 @@ class TrainingModel(model.SockeyeModel):
                                                                                 target_words=target_words, 
                                                                                 source_words=source_words,
                                                                                 grad_scale=self._positional_attention_loss_lambda)]
-            
             return mx.sym.Group(net_outputs + loss_attention), data_names, label_names
 
         # Fix model parameters as needed for different training options.
@@ -929,6 +930,10 @@ class EarlyStoppingTrainer:
         ####################
         model.run_forward_backward(batch, metric_train)
         
+        for i,o in enumerate(model.module.get_outputs()):
+            print("i: ",i)
+            print(o)
+        exit(0)
         # If using an extended optimizer, provide extra state information about the current batch
         optimizer = model.optimizer
         if metric_loss is not None and isinstance(optimizer, SockeyeOptimizer):

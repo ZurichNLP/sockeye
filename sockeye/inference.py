@@ -200,7 +200,8 @@ class InferenceModel(model.SockeyeModel):
                 # predicted_length_ratios: List[(n, 1)]
                 predicted_length_ratios = [self.length_ratio(source_encoded, source_encoded_length)]
 
-            return mx.sym.Group(decoder_init_states + predicted_length_ratios), data_names, label_names
+            debug = [source, pos_embed, position_probs]
+            return mx.sym.Group(decoder_init_states + predicted_length_ratios + debug), data_names, label_names
 
         default_bucket_key = self.max_input_length
         module = mx.mod.BucketingModule(sym_gen=sym_gen,
@@ -325,6 +326,13 @@ class InferenceModel(model.SockeyeModel):
 
         self.encoder_module.forward(data_batch=batch, is_train=False)
         decoder_init_states = self.encoder_module.get_outputs()
+        #decoder_init_states + predicted_length_ratios + source + pos_embed + position_probs
+        source = decoder_init_states[2]
+        pos_embed = decoder_init_states[3]
+        position_probs = decoder_init_states[4]
+        mx.ndarray.save("source.debug", source)
+        mx.ndarray.save("position_probs.debug", position_probs)
+        mx.ndarray.save("pos_embed.debug", pos_embed)
 
         if self.length_ratio is not None:
             estimated_length_ratio = decoder_init_states[-1]

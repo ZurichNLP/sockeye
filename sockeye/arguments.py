@@ -1181,6 +1181,10 @@ def add_learned_positions_args(params):
                               type=float,
                               default=0.0,
                               help='Scale monotone attention loss on learned positional embeddings by lambda, CE loss will be scaled by (1-lambda). Default: %(default)s.')
+    params.add_argument('--positional-attention-loss-margin',
+                              type=float,
+                              default=1.0,
+                              help='Expected margin for attention increase to be considered monotone. Default: %(default)s.')
     params.add_argument('--sublayer-context',
                               choices=C.SUBLAYER_CONTEXT_CHOICES,
                               default=C.SUBLAYER_CONTEXT_ADD,

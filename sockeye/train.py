@@ -767,7 +767,8 @@ def create_training_model(config: model.ModelConfig,
                                             gradient_accumulation=args.update_interval > 1,
                                             fixed_param_names=args.fixed_param_names,
                                             fixed_param_strategy=args.fixed_param_strategy,
-                                            positional_attention_loss_lambda=args.positional_attention_loss_lambda)
+                                            positional_attention_loss_lambda=args.positional_attention_loss_lambda,
+                                            positional_attention_loss_margin=args.positional_attention_loss_margin)
         
     
     

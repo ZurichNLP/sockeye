@@ -259,10 +259,11 @@ class MultilingualPositionalAttention(Loss):
                  num_attention_heads: int,
                  target_words: mx.sym.Symbol,
                  source_words: mx.sym.Symbol,
-                 grad_scale: Optional[float] = 0.5) -> List[mx.sym.Symbol]:
+                 grad_scale: Optional[float] = 0.5,
+                 margin: Optional[float] = 1.0) -> List[mx.sym.Symbol]:
         
         
-        loss = self.monotonicity_score_per_layer(attention_scores_list[-1], positional_attention, num_attention_heads, target_words, source_words)
+        loss = self.monotonicity_score_per_layer(attention_scores_list[-1], positional_attention, num_attention_heads, target_words, source_words, margin)
         
         return mx.sym.MakeLoss(loss,
                                 grad_scale=grad_scale)
@@ -273,7 +274,8 @@ class MultilingualPositionalAttention(Loss):
                                      positional_attention: mx.sym.Symbol,
                                      num_attention_heads: int,
                                      target_words: mx.sym.Symbol, 
-                                     source_words: mx.sym.Symbol):
+                                     source_words: mx.sym.Symbol,
+                                     margin: float):
         """
         :param attention_scores: decoder-encoder attention scores (MultiHeadAttention). Shape (batch_size * attention_heads, target_length, source_length)
         :param positional_attention: Attention from encoder layer hidden states (after self-attention) to positions. Shape (batch, src_len, pos_len=src_len)
@@ -319,6 +321,7 @@ class MultilingualPositionalAttention(Loss):
         # if target and source language is not English, set loss == 0
         #print("non en id {}, en trg id {}".format(self.loss_config.non_en_id, self.loss_config.en_trg_id))
         
+        ## set loss for non-English pairs to 0
         en_trg_mask = (source_words == self.loss_config.en_trg_id) # (batch, src_len), 1 if <2en> present, 0 if <2en> not present
         en_trg_mask = mx.sym.sum(en_trg_mask, axis=1) 
         non_en_trg_mask = (en_trg_mask == 0) # (batch, src_len), 0 if <2en> present, 1 if <2en> not present
@@ -329,10 +332,15 @@ class MultilingualPositionalAttention(Loss):
         non_en_pairs_mask_inv = (non_en_pairs_mask == 0)
         non_en_pairs_mask_inv = mx.sym.expand_dims(non_en_pairs_mask_inv, axis=1)
         #non_en_pairs_mask_inv = mx.sym.broadcast_mul(mx.sym.ones_like(adjacent_pos_difference), non_en_pairs_mask_inv)
-        # set loss for non-English pairs to 0
         adjacent_pos_difference =  mx.sym.broadcast_mul(non_en_pairs_mask_inv, adjacent_pos_difference)
         
+        ## add margin, but not to padded positions
+        margin = margin * mask
+        margin = margin.reshape_like(adjacent_pos_difference)
+        adjacent_pos_difference = adjacent_pos_difference + margin
+        
         # loss= max(0, avg(y)-avg(y+1)), if y-(y+1) >0, this is the loss, else if y-(y+1) < 0, loss=0
+        # with margin: loss= max(0, (avg(y)-avg(y+1))+margin ), if (y-(y+1))+margin >0, this is the loss, else if (y-(y+1))+margin < 0, loss=0
         greater_than_zero = mx.sym.broadcast_greater_equal(adjacent_pos_difference, mx.sym.zeros(shape=(1,))) # 1 if avg>0, 0 otherwise, shape (batch, target_length)
         adjacent_pos_difference  = adjacent_pos_difference * greater_than_zero # (batch, target_length): target_length = 0 or diff attention score (y-(y+1))
         
