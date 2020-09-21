@@ -365,6 +365,7 @@ class InferenceModel(model.SockeyeModel):
             provide_data=self._get_decoder_data_shapes(bucket_key, batch_beam_size))
         self.decoder_module.forward(data_batch=batch, is_train=False)
         out, attention_probs, *model_state.states = self.decoder_module.get_outputs()
+        mx.ndarray.save("attention.debug", attention_probs)
         return out, attention_probs, model_state
 
     @property

@@ -260,10 +260,11 @@ class MultilingualPositionalAttention(Loss):
                  target_words: mx.sym.Symbol,
                  source_words: mx.sym.Symbol,
                  grad_scale: Optional[float] = 0.5,
-                 margin: Optional[float] = 1.0) -> List[mx.sym.Symbol]:
+                 margin: Optional[float] = 1.0,
+                 absolute_positions: Optional[bool] = False) -> List[mx.sym.Symbol]:
         
         
-        loss = self.monotonicity_score_per_layer(attention_scores_list[-1], positional_attention, num_attention_heads, target_words, source_words, margin)
+        loss = self.monotonicity_score_per_layer(attention_scores_list[-1], positional_attention, num_attention_heads, target_words, source_words, margin, absolute_positions)
         
         return mx.sym.MakeLoss(loss,
                                 grad_scale=grad_scale)
@@ -275,7 +276,8 @@ class MultilingualPositionalAttention(Loss):
                                      num_attention_heads: int,
                                      target_words: mx.sym.Symbol, 
                                      source_words: mx.sym.Symbol,
-                                     margin: float):
+                                     margin: float,
+                                     absolute_positions: bool):
         """
         :param attention_scores: decoder-encoder attention scores (MultiHeadAttention). Shape (batch_size * attention_heads, target_length, source_length)
         :param positional_attention: Attention from encoder layer hidden states (after self-attention) to positions. Shape (batch, src_len, pos_len=src_len)
@@ -290,16 +292,18 @@ class MultilingualPositionalAttention(Loss):
         
         # take dot product of positional attention and actual positions
         source_positions = mx.contrib.sym.arange_like(data=positional_attention, start=1, axis=-1) # (src_len,), needs mxnet-1.6!
-        weighted_source_positions = mx.sym.dot(positional_attention, source_positions) # (batch, src_len)
-        weighted_source_positions = weighted_source_positions.expand_dims(axis=1) # (batch, 1, src_len)
-        
-        p = mx.sym.ones_like(attention_scores) # (batch_size, target_length, source_length)
-        positions = mx.sym.broadcast_mul(p, weighted_source_positions) # shape(batch, target_length, source_length), values in source_length = arange(source_length) 
+        if absolute_positions:
+            positions = mx.sym.broadcast_mul(mx.sym.ones_like(attention_scores), source_positions)
+        else:
+            weighted_source_positions = mx.sym.dot(positional_attention, source_positions) # (batch, src_len)
+            weighted_source_positions = weighted_source_positions.expand_dims(axis=1) # (batch, 1, src_len)
+            p = mx.sym.ones_like(attention_scores) # (batch_size, target_length, source_length)
+            positions = mx.sym.broadcast_mul(p, weighted_source_positions) # shape(batch, target_length, source_length), values in source_length = arange(source_length) * positional_attention
         
         # no need to remove padding from source, padded positions are 0 in attention scores
         positionally_weighted_attention = mx.sym.broadcast_mul(attention_scores, positions) # shape(batch_size, target_length, source_length (attention_score*position))
         # take average over sequences
-        avg = mx.sym.mean(positionally_weighted_attention, axis=2) # shape (batch, target_length)
+        avg = mx.sym.sum(positionally_weighted_attention, axis=2) # shape (batch, target_length)
         
         ### set padded positions in target to zero (we dont care about alignment scores from padded tokens)
         mask = (target_words != C.PAD_ID) # target_words (batch_size, target_length), mask: 0 where padded, 1 otherwise
@@ -317,35 +321,35 @@ class MultilingualPositionalAttention(Loss):
         grid = mx.sym.GridGenerator(data=warp, transform_type='warp')
         shifted_avg = mx.sym.BilinearSampler(avg_to_shift, grid).squeeze() # (1,1,batch,target_length) -> (batch, target_length)
         
+        ## add margin, but not to padded positions
+        margin = margin * mask
+        margin = margin.reshape_like(shifted_avg)
+        shifted_avg = shifted_avg - margin
+        
         adjacent_pos_difference = avg - shifted_avg # (batch, target_length)
-        # if target and source language is not English, set loss == 0
-        #print("non en id {}, en trg id {}".format(self.loss_config.non_en_id, self.loss_config.en_trg_id))
+        test = adjacent_pos_difference
         
         ## set loss for non-English pairs to 0
+        # if target and source language is not English, set loss == 0
+        #print("non en id {}, en trg id {}".format(self.loss_config.non_en_id, self.loss_config.en_trg_id))
         en_trg_mask = (source_words == self.loss_config.en_trg_id) # (batch, src_len), 1 if <2en> present, 0 if <2en> not present
         en_trg_mask = mx.sym.sum(en_trg_mask, axis=1) 
         non_en_trg_mask = (en_trg_mask == 0) # (batch, src_len), 0 if <2en> present, 1 if <2en> not present
-        non_en_mask = (source_words == self.loss_config.non_en_id) # (batch, src_len), 1 if <non_en> present, 0 if not <non_en> present
-        non_en_mask = mx.sym.sum(non_en_mask, axis=1) # (batch,)
-        mask_sum = non_en_trg_mask + non_en_mask 
+        en_src_mask = (source_words == self.loss_config.non_en_id) # (batch, src_len), 1 if <non_en> present, 0 if not <non_en> present
+        non_en_src_mask = mx.sym.sum(en_src_mask, axis=1) # (batch,)
+        mask_sum = non_en_trg_mask + non_en_src_mask 
         non_en_pairs_mask = mx.sym.broadcast_equal(mask_sum, (mx.sym.ones(shape=(1)) *2 ) ) ## 1 where sum was 2, i.e. src + trg not English, 0 otherwise
         non_en_pairs_mask_inv = (non_en_pairs_mask == 0)
         non_en_pairs_mask_inv = mx.sym.expand_dims(non_en_pairs_mask_inv, axis=1)
-        #non_en_pairs_mask_inv = mx.sym.broadcast_mul(mx.sym.ones_like(adjacent_pos_difference), non_en_pairs_mask_inv)
         adjacent_pos_difference =  mx.sym.broadcast_mul(non_en_pairs_mask_inv, adjacent_pos_difference)
-        
-        ## add margin, but not to padded positions
-        margin = margin * mask
-        margin = margin.reshape_like(adjacent_pos_difference)
-        adjacent_pos_difference = adjacent_pos_difference + margin
         
         # loss= max(0, avg(y)-avg(y+1)), if y-(y+1) >0, this is the loss, else if y-(y+1) < 0, loss=0
         # with margin: loss= max(0, (avg(y)-avg(y+1))+margin ), if (y-(y+1))+margin >0, this is the loss, else if (y-(y+1))+margin < 0, loss=0
-        greater_than_zero = mx.sym.broadcast_greater_equal(adjacent_pos_difference, mx.sym.zeros(shape=(1,))) # 1 if avg>0, 0 otherwise, shape (batch, target_length)
-        adjacent_pos_difference  = adjacent_pos_difference * greater_than_zero # (batch, target_length): target_length = 0 or diff attention score (y-(y+1))
+        adjacent_pos_difference = mx.sym.broadcast_maximum(lhs=mx.sym.zeros_like(adjacent_pos_difference), rhs=adjacent_pos_difference)
         
         layer_loss = mx.sym.sum(adjacent_pos_difference, axis=1) # (batch, )
-        return layer_loss 
+        return layer_loss
+        #return layer_loss, avg, shifted_avg,  test, positions ,positionally_weighted_attention
     
     def create_metric(self) -> "MultilingualPositionalAttentionMetric":
         return MultilingualPositionalAttentionMetric(self.loss_config)

@@ -333,7 +333,8 @@ class TransformerDecoder(Decoder):
         target = mx.sym.reshape(target, shape=(-3, -1))
 
         # TODO(fhieber): no attention probs for now
-        attention_probs = mx.sym.sum(mx.sym.zeros_like(source_encoded), axis=2, keepdims=False)
+        #attention_probs = mx.sym.sum(mx.sym.zeros_like(source_encoded), axis=2, keepdims=False)
+        attention_probs = att_probs.squeeze()
 
         return target, attention_probs, new_states, None
 

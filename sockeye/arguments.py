@@ -1185,6 +1185,9 @@ def add_learned_positions_args(params):
                               type=float,
                               default=1.0,
                               help='Expected margin for attention increase to be considered monotone. Default: %(default)s.')
+    params.add_argument('--positional-attention-loss-absolute-positions',
+                              action='store_true',
+                              help='Use absolute positions without positional attention to calculate loss.')
     params.add_argument('--sublayer-context',
                               choices=C.SUBLAYER_CONTEXT_CHOICES,
                               default=C.SUBLAYER_CONTEXT_ADD,

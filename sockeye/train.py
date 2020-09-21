@@ -768,7 +768,8 @@ def create_training_model(config: model.ModelConfig,
                                             fixed_param_names=args.fixed_param_names,
                                             fixed_param_strategy=args.fixed_param_strategy,
                                             positional_attention_loss_lambda=args.positional_attention_loss_lambda,
-                                            positional_attention_loss_margin=args.positional_attention_loss_margin)
+                                            positional_attention_loss_margin=args.positional_attention_loss_margin,
+                                            positional_attention_loss_absolute_positions=args.positional_attention_loss_absolute_positions)
         
     
     
