@@ -86,6 +86,9 @@ SUBLAYER_CONTEXT_ACT_ADD="context-act-add" # context + pos_embed + activation
 
 SUBLAYER_CONTEXT_CHOICES=[SUBLAYER_CONTEXT_ADD, SUBLAYER_CONTEXT_MUL, SUBLAYER_CONTEXT_PROJ_ADD, SUBLAYER_CONTEXT_PROJ_MUL, SUBLAYER_CONTEXT_DOT, SUBLAYER_CONTEXT_ACT_ADD]
 
+# monotonicity loss: use learned (reordered) positional embeddings or absolute positions (range)
+LEARNED_MULTILINGUAL_POSITIONS="learned"
+ABSOLUTE_MULTILINGUAL_POSITIONS="absolute"
 
 
 # available decoder
@@ -427,7 +430,7 @@ LENGTH_TASK_LENGTH = 'length'
 LOSS_NORM_BATCH = 'batch'
 LOSS_NORM_VALID = "valid"
 
-MULTILINGUAL_POSITIONAL_ATTENTION_LOSS = "multilingual-positional-attention-loss"
+ATTENTION_MONOTONICITY_LOSS = "monotone-attention-loss"
 
 TARGET_MAX_LENGTH_FACTOR = 2
 DEFAULT_NUM_STD_MAX_OUTPUT_LENGTH = 2

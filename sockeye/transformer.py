@@ -43,7 +43,7 @@ class TransformerConfig(config.Config):
                  lhuc: bool = False,
                  dtype: str = C.DTYPE_FP32,
                  return_dec_enc_att_probs: Optional[bool] = False,
-                 positional_attention: Optional[bool] = False,
+                 attention_monotonicity: Optional[bool] = False,
                  non_en_id: Optional[int] = None,
                  sublayer_context: Optional[str] = C.SUBLAYER_CONTEXT_ADD) -> None:  # type: ignore
         super().__init__()
@@ -64,7 +64,7 @@ class TransformerConfig(config.Config):
         self.use_lhuc = lhuc
         self.dtype = dtype
         self.return_dec_enc_att_probs = return_dec_enc_att_probs
-        self.positional_attention = positional_attention
+        self.attention_monotonicity = attention_monotonicity
         self.non_en_id = non_en_id
         self.sublayer_context = sublayer_context
 

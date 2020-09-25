@@ -559,7 +559,7 @@ class AddSinCosPositionalEmbeddings(PositionalEncoder):
 
         pos_embedding = mx.sym.BlockGrad(pos_embedding)
 
-        return mx.sym.broadcast_add(data, pos_embedding, name="%s_add" % self.prefix), None
+        return mx.sym.broadcast_add(data, pos_embedding, name="%s_add" % self.prefix)
 
     def get_num_hidden(self) -> int:
         return self.num_embed
@@ -1045,7 +1045,7 @@ class TransformerEncoder(Encoder, mx.gluon.HybridBlock):
 
         with self.name_scope():
             self.layers = mx.gluon.nn.HybridSequential()
-            if config.positional_attention:
+            if config.attention_monotonicity == "learned":
                 for i in range(config.num_layers-1):
                     self.layers.add(transformer.TransformerEncoderBlock(config, prefix="%d_" % i))
                 # add positional embedding layer to last TransformerEncoderBlock

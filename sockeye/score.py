@@ -115,10 +115,19 @@ def score(args: argparse.Namespace):
             args=args,
             model_folder=args.model)
         
-        if args.positional_attention_monotonicity_scoring is not None:
-            print(model_config.config_decoder)
-            check_condition(isinstance(model_config.config_decoder, transformer.TransformerConfig) and isinstance(model_config.config_encoder, transformer.TransformerConfig) and model_config.config_encoder.positional_embedding_type == C.LEARNED_POSITIONAL_EMBEDDING,
-                        "Scoring with attention on positional embeddings only available with transformer models. Embedding type needs to be 'learned'.")
+        attention_monotonicity_scoring_margin=None
+        attention_monotonicity_scoring_margin=None
+        
+        if args.attention_monotonicity_scoring is not None:
+            attention_monotonicity = "absolute" # default, can be used with any transformer model, learned only available for models that have been trained with attention_monotonicity=learned
+            attention_monotonicity_scoring_margin = 1.0 if args.attention_monotonicity_scoring_margin is None else args.attention_monotonicity_scoring_margin
+            
+            if hasattr(model_config, "attention_monotonicity"):
+                attention_monotonicity = model_config.attention_monotonicity
+                if args.attention_monotonicity_scoring_margin is None:
+                    attention_monotonicity_scoring_margin = model_config.attention_monotonicity_config_loss.margin
+            else:
+                logger.warn("Model has not been trained with attention monotonicity loss. Attention monotonicity scoring with learned positions is not available, will use absolute positions with a margin of 1.0.")
 
         scoring_model = scoring.ScoringModel(config=model_config,
                                              model_dir=args.model,
@@ -133,7 +142,9 @@ def score(args: argparse.Namespace):
                                              softmax_temperature=args.softmax_temperature,
                                              brevity_penalty_type=args.brevity_penalty_type,
                                              constant_length_ratio=args.brevity_penalty_constant_length_ratio,
-                                             positional_attention_scoring=args.positional_attention_monotonicity_scoring)
+                                             attention_monotonicity_scoring=args.attention_monotonicity_scoring,
+                                             attention_monotonicity_scoring_margin=attention_monotonicity_scoring_margin,
+                                             attention_monotonicity=attention_monotonicity)
 
         scorer = scoring.Scorer(scoring_model, source_vocabs, target_vocab)
 

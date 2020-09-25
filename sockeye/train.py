@@ -104,9 +104,13 @@ def check_arg_compatibility(args: argparse.Namespace):
         check_condition(args.decoder == C.RNN_NAME,
                         "The attention-based copying mechanism currently supports RNN decoders only.")
         
-    if args.multilingual_positional_embeddings:
+    if args.attention_monotonicity == C.LEARNED_MULTILINGUAL_POSITIONS:
         check_condition(args.decoder == C.TRANSFORMER_TYPE and args.transformer_positional_embedding_type == C.LEARNED_POSITIONAL_EMBEDDING,
-                        "Option multilingual positional embeddings only available with transformer decoder. Embedding type needs to be 'learned'.")
+                        "Attention monotonicity loss with learned reordering only available with transformer decoder. Embedding type needs to be 'learned'.")
+        
+    if args.attention_monotonicity == C.ABSOLUTE_MULTILINGUAL_POSITIONS:
+        check_condition(args.decoder == C.TRANSFORMER_TYPE,
+                        "Attention monotonicity loss only available with transformer decoder.")
 
 
 def check_resume(args: argparse.Namespace, output_folder: str) -> bool:
@@ -410,7 +414,7 @@ def create_encoder_config(args: argparse.Namespace,
             max_seq_len_source=max_seq_len_source,
             max_seq_len_target=max_seq_len_target,
             conv_config=config_conv,
-            positional_attention=args.multilingual_positional_embeddings,
+            attention_monotonicity=args.attention_monotonicity,
             non_en_id=non_en_id,
             sublayer_context=args.sublayer_context,
             lhuc=args.lhuc is not None and (C.LHUC_ENCODER in args.lhuc or C.LHUC_ALL in args.lhuc))
@@ -491,7 +495,7 @@ def create_decoder_config(args: argparse.Namespace, encoder_num_hidden: int,
             max_seq_len_target=max_seq_len_target,
             conv_config=None,
             lhuc=args.lhuc is not None and (C.LHUC_DECODER in args.lhuc or C.LHUC_ALL in args.lhuc),
-            return_dec_enc_att_probs=args.multilingual_positional_embeddings)
+            return_dec_enc_att_probs=args.attention_monotonicity is not None)
 
     elif args.decoder == C.CONVOLUTION_TYPE:
         if args.decoder_only:
@@ -703,13 +707,14 @@ def create_model_config(args: argparse.Namespace,
                                   label_smoothing=args.label_smoothing)
     
     monotonicity_config_loss = None
-    if args.multilingual_positional_embeddings:
-        multilingual_positional_config_loss = loss.LossConfig(name='multilingual-positional-attention-loss',
+    if args.attention_monotonicity is not None:
+        attention_monotonicity_config_loss = loss.LossConfig(name='monotone-attention-loss',
                                   vocab_size=None,
                                   normalization_type=None,
                                   label_smoothing=None,
                                   en_trg_id=en_trg_id, 
-                                  non_en_id=non_en_id)
+                                  non_en_id=non_en_id,
+                                  margin=args.attention_monotonicity_loss_margin)
 
     if args.length_task is not None:
         config_length_task = layers.LengthRatioConfig(num_layers=args.length_task_layers, weight=args.length_task_weight)
@@ -736,7 +741,8 @@ def create_model_config(args: argparse.Namespace,
                                      weight_normalization=args.weight_normalization,
                                      lhuc=args.lhuc is not None,
                                      num_pointers=num_pointers,
-                                     multilingual_positional_config_loss=multilingual_positional_config_loss)
+                                     attention_monotonicity=args.attention_monotonicity,
+                                     attention_monotonicity_config_loss=attention_monotonicity_config_loss)
     return model_config
 
 
@@ -767,9 +773,9 @@ def create_training_model(config: model.ModelConfig,
                                             gradient_accumulation=args.update_interval > 1,
                                             fixed_param_names=args.fixed_param_names,
                                             fixed_param_strategy=args.fixed_param_strategy,
-                                            positional_attention_loss_lambda=args.positional_attention_loss_lambda,
-                                            positional_attention_loss_margin=args.positional_attention_loss_margin,
-                                            positional_attention_loss_absolute_positions=args.positional_attention_loss_absolute_positions)
+                                            attention_monotonicity=args.attention_monotonicity,
+                                            attention_monotonicity_loss_lambda=args.attention_monotonicity_loss_lambda,
+                                            attention_monotonicity_loss_margin=args.attention_monotonicity_loss_margin)
         
     
     
@@ -930,7 +936,8 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
         max_seq_len_target = config_data.max_seq_len_target
         
         non_en_id = None
-        if args.multilingual_positional_embeddings:
+        en_trg_id = None
+        if args.attention_monotonicity == C.LEARNED_MULTILINGUAL_POSITIONS:
             non_en_id = source_vocabs[0][C.NON_EN_SYMBOL]
             en_trg_id = source_vocabs[0][C.EN_TRG_ID]
 

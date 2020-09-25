@@ -1174,30 +1174,31 @@ def add_training_args(params):
 
 def add_learned_positions_args(params):
     params = params.add_argument_group("Parameters for learning multilingual positional embeddings")
-    params.add_argument('--multilingual-positional-embeddings',
-                              action='store_true',
-                              help="Use additional loss to encourage monotone decoder-encoder attention.")
-    params.add_argument('--positional-attention-loss-lambda',
+    params.add_argument('--attention-monotonicity',
+                              type=str,
+                              default=C.LEARNED_MULTILINGUAL_POSITIONS,
+                              help="Use additional loss to encourage monotone decoder-encoder attention. Positions are either absolute (simple monotonicity loss) or learned (learned reordering with additional sublayer in last encoder layer). Default: %(default)s")
+    params.add_argument('--attention-monotonicity-loss-lambda',
                               type=float,
                               default=0.0,
-                              help='Scale monotone attention loss on learned positional embeddings by lambda, CE loss will be scaled by (1-lambda). Default: %(default)s.')
-    params.add_argument('--positional-attention-loss-margin',
+                              help='Scale monotone attention loss on learned positional embeddings by lambda, CE loss will be scaled by (1-lambda) (for both learned positional reordering and absolute positions). Default: %(default)s.')
+    params.add_argument('--attention-monotonicity-loss-margin',
                               type=float,
                               default=1.0,
-                              help='Expected margin for attention increase to be considered monotone. Default: %(default)s.')
-    params.add_argument('--positional-attention-loss-absolute-positions',
-                              action='store_true',
-                              help='Use absolute positions without positional attention to calculate loss.')
+                              help='Expected margin for attention increase to be considered monotone (for both learned positional reordering and absolute positions). Default: %(default)s.')
     params.add_argument('--sublayer-context',
                               choices=C.SUBLAYER_CONTEXT_CHOICES,
                               default=C.SUBLAYER_CONTEXT_ADD,
-                              help='How to combine output of MHA in sublayer with non-English positional embeddings. Default: %(default)s.')
+                              help='How to combine output of MHA in reordering sublayer with non-English positional embeddings. Default: %(default)s.')
     
-def add_positional_attention_scoring_args(params):
+def add_attention_monotonicity_scoring_args(params):
     params = params.add_argument_group("Parameters for scoring monotonicity with attention on positional embeddings")
-    params.add_argument('--positional-attention-monotonicity-scoring',
+    params.add_argument('--attention-monotonicity-scoring',
                               action='store_true',
-                              help="Print score for monotonicity of attention on positional embeddings.")
+                              help="Print score monotonicity score of decoder-encoder attention.")
+    params.add_argument('--attention-monotonicity-scoring-margin',
+                              type=float,
+                              help="Margin for scoring with monotonicity of attention. Default: Use margin from model config.")
 
 def add_train_cli_args(params):
     add_training_io_args(params)
@@ -1219,7 +1220,7 @@ def add_score_cli_args(params):
     add_vocab_args(params)
     add_device_args(params)
     add_batch_args(params, default_batch_size=500)
-    add_positional_attention_scoring_args(params)
+    add_attention_monotonicity_scoring_args(params)
 
     params = params.add_argument_group("Scoring parameters")
 

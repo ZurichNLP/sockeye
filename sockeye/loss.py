@@ -47,7 +47,8 @@ class LossConfig(config.Config):
                  length_task_link: Optional[str] = None,
                  length_task_weight: float = 1.0, 
                  en_trg_id: Optional[int] = None,
-                 non_en_id: Optional[int] = None) -> None:
+                 non_en_id: Optional[int] = None,
+                 margin: Optional[float] = None) -> None:
         super().__init__()
         self.name = name
         self.vocab_size = vocab_size
@@ -57,6 +58,7 @@ class LossConfig(config.Config):
         self.length_task_weight = length_task_weight
         self.en_trg_id = en_trg_id
         self.non_en_id = non_en_id
+        self.margin = margin
         
 
 
@@ -71,8 +73,8 @@ def get_loss(config: LossConfig) -> 'Loss':
         return CrossEntropyLoss(config,
                                 output_names=[C.SOFTMAX_OUTPUT_NAME],
                                 label_names=[C.TARGET_LABEL_NAME])
-    elif config.name == C.MULTILINGUAL_POSITIONAL_ATTENTION_LOSS:
-        return MultilingualPositionalAttention(config)
+    elif config.name == C.ATTENTION_MONOTONICITY_LOSS:
+        return MonotoneAttention(config)
     else:
         raise ValueError("unknown loss name: %s" % config.name)
 
@@ -241,7 +243,7 @@ class CrossEntropyMetric(EvalMetric):
 
             self.sum_metric += ce.asscalar()
 
-class MultilingualPositionalAttention(Loss):
+class MonotoneAttention(Loss):
     """
     Computes the attention monotonicity loss.
 
@@ -250,7 +252,7 @@ class MultilingualPositionalAttention(Loss):
     """
 
     def __init__(self, loss_config: LossConfig) -> None:
-        logger.info("Loss: MultilingualPositionalAttention")
+        logger.info("Loss: AttentionMonotonicity")
         self.loss_config = loss_config
     
     def get_loss(self, 
@@ -264,9 +266,13 @@ class MultilingualPositionalAttention(Loss):
                  absolute_positions: Optional[bool] = False) -> List[mx.sym.Symbol]:
         
         
-        loss = self.monotonicity_score_per_layer(attention_scores_list[-1], positional_attention, num_attention_heads, target_words, source_words, margin, absolute_positions)
         
-        return mx.sym.MakeLoss(loss,
+        total_loss = self.monotonicity_score_per_layer(attention_scores_list[0], positional_attention, num_attention_heads, target_words, source_words, margin, absolute_positions)
+        
+        for layer in range(1, len(attention_scores_list)):
+            loss = self.monotonicity_score_per_layer(attention_scores_list[layer], positional_attention, num_attention_heads, target_words, source_words, margin, absolute_positions)
+            total_loss = mx.sym.broadcast_add(total_loss, loss)
+        return mx.sym.MakeLoss(total_loss,
                                 grad_scale=grad_scale)
     
     
@@ -291,7 +297,7 @@ class MultilingualPositionalAttention(Loss):
         attention_scores = mx.sym.mean(attention_scores, axis=1) # (batch_size, target_length, source_length)
         
         # take dot product of positional attention and actual positions
-        source_positions = mx.contrib.sym.arange_like(data=positional_attention, start=1, axis=-1) # (src_len,), needs mxnet-1.6!
+        source_positions = mx.contrib.sym.arange_like(data=source_words, start=1, axis=1) # (src_len,), needs mxnet-1.6!
         if absolute_positions:
             positions = mx.sym.broadcast_mul(mx.sym.ones_like(attention_scores), source_positions)
         else:
@@ -310,58 +316,57 @@ class MultilingualPositionalAttention(Loss):
         avg_r = avg.reshape(shape=(-3,))
         avg = mx.sym.broadcast_mul(avg_r, mask).reshape_like(avg)
         
-        avg_to_shift = mx.sym.expand_dims(avg, axis=0)
-        avg_to_shift = mx.sym.expand_dims(avg_to_shift, axis=0) # (1,1, batch, target_length)
+        shifted_avg = mx.sym.slice_axis(avg, axis=-1, begin=1, end=None) # (batch_size, target_length-1)
+        padding = mx.sym.slice_axis(mx.sym.zeros_like(shifted_avg), axis=-1, begin=0, end=1) # (batch_size, 1)
+        shifted_avg = mx.sym.concat(shifted_avg, padding, dim=-1) # (batch_size, target_length)
         
-        # shift target_length dimension to the left with BilinearSampler https://mxnet.apache.org/api/python/docs/api/symbol/symbol.html?highlight=bilinear#mxnet.symbol.BilinearSamplers
-        ones = mx.sym.ones_like(avg) # (batch, target_length)
-        zeros = mx.sym.zeros_like(avg)
-        stacked = mx.sym.stack(ones, zeros, axis=0) # (2, batch, target_length)
-        warp = mx.sym.expand_dims(stacked, axis=0) # (1, 2, batch, target_length)
-        grid = mx.sym.GridGenerator(data=warp, transform_type='warp')
-        shifted_avg = mx.sym.BilinearSampler(avg_to_shift, grid).squeeze() # (1,1,batch,target_length) -> (batch, target_length)
-        
-        ## add margin, but not to padded positions
-        margin = margin * mask
-        margin = margin.reshape_like(shifted_avg)
+        ## in shifted avg: one more padded position (since shifted to left), create new mask and apply to adjacent_pos_difference
+        shifted_mask = (shifted_avg != 0)
+        margin = mx.sym.ones_like(shifted_avg) *margin
         shifted_avg = shifted_avg - margin
         
         adjacent_pos_difference = avg - shifted_avg # (batch, target_length)
-        test = adjacent_pos_difference
+        adjacent_pos_difference = adjacent_pos_difference * shifted_mask
         
-        ## set loss for non-English pairs to 0
-        # if target and source language is not English, set loss == 0
-        #print("non en id {}, en trg id {}".format(self.loss_config.non_en_id, self.loss_config.en_trg_id))
-        en_trg_mask = (source_words == self.loss_config.en_trg_id) # (batch, src_len), 1 if <2en> present, 0 if <2en> not present
-        en_trg_mask = mx.sym.sum(en_trg_mask, axis=1) 
-        non_en_trg_mask = (en_trg_mask == 0) # (batch, src_len), 0 if <2en> present, 1 if <2en> not present
-        en_src_mask = (source_words == self.loss_config.non_en_id) # (batch, src_len), 1 if <non_en> present, 0 if not <non_en> present
-        non_en_src_mask = mx.sym.sum(en_src_mask, axis=1) # (batch,)
-        mask_sum = non_en_trg_mask + non_en_src_mask 
-        non_en_pairs_mask = mx.sym.broadcast_equal(mask_sum, (mx.sym.ones(shape=(1)) *2 ) ) ## 1 where sum was 2, i.e. src + trg not English, 0 otherwise
-        non_en_pairs_mask_inv = (non_en_pairs_mask == 0)
-        non_en_pairs_mask_inv = mx.sym.expand_dims(non_en_pairs_mask_inv, axis=1)
-        adjacent_pos_difference =  mx.sym.broadcast_mul(non_en_pairs_mask_inv, adjacent_pos_difference)
+        ## if learned reordered positions: mask zero-shot pairs for loss
+        if not absolute_positions:
+            ## set loss for non-English pairs to 0
+            # if target and source language is not English, set loss == 0
+            en_trg_mask = (source_words == self.loss_config.en_trg_id) # (batch, src_len), 1 if <2en> present, 0 if <2en> not present
+            en_trg_mask = mx.sym.sum(en_trg_mask, axis=1) 
+            non_en_trg_mask = (en_trg_mask == 0) # (batch, src_len), 0 if <2en> present, 1 if <2en> not present
+            en_src_mask = (source_words == self.loss_config.non_en_id) # (batch, src_len), 1 if <non_en> present, 0 if not <non_en> present
+            non_en_src_mask = mx.sym.sum(en_src_mask, axis=1) # (batch,)
+            mask_sum = non_en_trg_mask + non_en_src_mask 
+            non_en_pairs_mask = mx.sym.broadcast_equal(mask_sum, (mx.sym.ones(shape=(1)) *2 ) ) ## 1 where sum was 2, i.e. src + trg not English, 0 otherwise
+            non_en_pairs_mask_inv = (non_en_pairs_mask == 0)
+            non_en_pairs_mask_inv = mx.sym.expand_dims(non_en_pairs_mask_inv, axis=1)
+            adjacent_pos_difference =  mx.sym.broadcast_mul(non_en_pairs_mask_inv, adjacent_pos_difference)
         
         # loss= max(0, avg(y)-avg(y+1)), if y-(y+1) >0, this is the loss, else if y-(y+1) < 0, loss=0
         # with margin: loss= max(0, (avg(y)-avg(y+1))+margin ), if (y-(y+1))+margin >0, this is the loss, else if (y-(y+1))+margin < 0, loss=0
         adjacent_pos_difference = mx.sym.broadcast_maximum(lhs=mx.sym.zeros_like(adjacent_pos_difference), rhs=adjacent_pos_difference)
         
         layer_loss = mx.sym.sum(adjacent_pos_difference, axis=1) # (batch, )
+        
+        # normalize by valid tokens
+        mask = (avg !=0 )
+        num_valid_positions = mx.sym.sum(mask, axis=1)
+        layer_loss = mx.sym.broadcast_div(layer_loss, num_valid_positions)
+        
         return layer_loss
-        #return layer_loss, avg, shifted_avg,  test, positions ,positionally_weighted_attention
     
-    def create_metric(self) -> "MultilingualPositionalAttentionMetric":
-        return MultilingualPositionalAttentionMetric(self.loss_config)
+    def create_metric(self) -> "MonotonoeAttentionMetric":
+        return MonotoneAttentionMetric(self.loss_config)
         
 
-class MultilingualPositionalAttentionMetric(EvalMetric):
+class MonotoneAttentionMetric(EvalMetric):
     """
     Calculate the monotonicity of attention scores (averaged over decoder layers).
     """
     def __init__(self,
                  loss_config: LossConfig,
-                 name: str = C.MULTILINGUAL_POSITIONAL_ATTENTION_LOSS,
+                 name: str = C.ATTENTION_MONOTONICITY_LOSS,
                  output_names: Optional[List[str]] = None,
                  label_names: Optional[List[str]] = None) -> None:
         super().__init__(name, output_names=output_names, label_names=label_names)
