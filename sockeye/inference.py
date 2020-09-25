@@ -177,7 +177,7 @@ class InferenceModel(model.SockeyeModel):
 
             # encoder
             # source_encoded: (source_encoded_length, batch_size, encoder_depth)
-            if hasattr(self.config.attention_monotonicity, "attention_monotonicity") and self.config.attention_monotonicity == "learned":
+            if hasattr(self.config, "attention_monotonicity") and self.config.attention_monotonicity == "learned":
                 (source_encoded,
                 source_encoded_length,
                 source_encoded_seq_len,
@@ -207,7 +207,6 @@ class InferenceModel(model.SockeyeModel):
                 # predicted_length_ratios: List[(n, 1)]
                 predicted_length_ratios = [self.length_ratio(source_encoded, source_encoded_length)]
 
-            #debug = [source, pos_embed, position_probs]
             return mx.sym.Group(decoder_init_states + predicted_length_ratios), data_names, label_names
 
         default_bucket_key = self.max_input_length
@@ -365,6 +364,7 @@ class InferenceModel(model.SockeyeModel):
             provide_data=self._get_decoder_data_shapes(bucket_key, batch_beam_size))
         self.decoder_module.forward(data_batch=batch, is_train=False)
         out, attention_probs, *model_state.states = self.decoder_module.get_outputs()
+   
         return out, attention_probs, model_state
 
     @property
