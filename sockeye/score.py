@@ -116,13 +116,12 @@ def score(args: argparse.Namespace):
             model_folder=args.model)
         
         attention_monotonicity_scoring_margin=None
-        attention_monotonicity_scoring_margin=None
         
         if args.attention_monotonicity_scoring is not None:
             attention_monotonicity = "absolute" # default, can be used with any transformer model, learned only available for models that have been trained with attention_monotonicity=learned
             attention_monotonicity_scoring_margin = 1.0 if args.attention_monotonicity_scoring_margin is None else args.attention_monotonicity_scoring_margin
             
-            if hasattr(model_config, "attention_monotonicity"):
+            if hasattr(model_config, "attention_monotonicity") and model_config.attention_monotonicity is not None:
                 attention_monotonicity = model_config.attention_monotonicity
                 if args.attention_monotonicity_scoring_margin is None:
                     attention_monotonicity_scoring_margin = model_config.attention_monotonicity_config_loss.margin

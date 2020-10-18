@@ -207,6 +207,7 @@ class InferenceModel(model.SockeyeModel):
                 # predicted_length_ratios: List[(n, 1)]
                 predicted_length_ratios = [self.length_ratio(source_encoded, source_encoded_length)]
 
+            #debug = [source, pos_embed, position_probs]
             return mx.sym.Group(decoder_init_states + predicted_length_ratios), data_names, label_names
 
         default_bucket_key = self.max_input_length
@@ -364,7 +365,6 @@ class InferenceModel(model.SockeyeModel):
             provide_data=self._get_decoder_data_shapes(bucket_key, batch_beam_size))
         self.decoder_module.forward(data_batch=batch, is_train=False)
         out, attention_probs, *model_state.states = self.decoder_module.get_outputs()
-   
         return out, attention_probs, model_state
 
     @property
@@ -944,7 +944,7 @@ class TranslatorOutput:
                  'nbest_tokens',
                  'nbest_attention_matrices',
                  'nbest_scores',
-                 'positional_attention_score')
+                 'monotonicity_score')
 
     def __init__(self,
                  sentence_id: SentenceId,
@@ -958,7 +958,7 @@ class TranslatorOutput:
                  nbest_tokens: Optional[List[Tokens]] = None,
                  nbest_attention_matrices: Optional[List[np.ndarray]] = None,
                  nbest_scores: Optional[List[float]] = None,
-                 positional_attention_score: Optional[float] = None) -> None:
+                 monotonicity_score: Optional[float] = None) -> None:
         self.sentence_id = sentence_id
         self.translation = translation
         self.tokens = tokens
@@ -970,7 +970,7 @@ class TranslatorOutput:
         self.nbest_tokens = nbest_tokens
         self.nbest_attention_matrices = nbest_attention_matrices
         self.nbest_scores = nbest_scores
-        self.positional_attention_score = positional_attention_score
+        self.monotonicity_score = monotonicity_score
 
     def json(self, align_threshold: float = 0.0) -> Dict:
         """

@@ -220,7 +220,6 @@ class ScoringModel(model.SockeyeModel):
                                     if self.length_ratio is not None else mx.sym.zeros_like(sums)
             sums = sums - self.brevity_penalty(target_length - 1, length_ratio * source_encoded_length)
             
-            attention_monotonicity_scores = None
             if self.attention_monotonicity_scorer is not None:
                 if self.attention_monotonicity == "learned":
                     attention_monotonicity_scores = self.attention_monotonicity_scorer.get_loss(attention_scores_list=attention_scores_list,
@@ -240,10 +239,10 @@ class ScoringModel(model.SockeyeModel):
                                                                                     margin=self.attention_monotonicity_scoring_margin,
                                                                                     absolute_positions=True,
                                                                                     grad_scale=1.0)
-
+                return mx.sym.Group([sums, target_dists, attention_monotonicity_scores] ), data_names, label_names
             # Return the sums and the target distributions
             # sums: (batch_size,) target_dists: (batch_size, target_seq_len, target_vocab_size)
-            return mx.sym.Group([sums, target_dists, attention_monotonicity_scores]), data_names, label_names
+            return mx.sym.Group([sums, target_dists]), data_names, label_names
 
         symbol, _, __ = sym_gen(default_bucket_key)
         self.module = mx.mod.Module(symbol=symbol,

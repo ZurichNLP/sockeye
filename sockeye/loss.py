@@ -293,32 +293,32 @@ class MonotoneAttention(Loss):
         """
         
         # take average of attention_heads on each position
-        attention_scores = attention_scores.reshape(shape=(-4, -1, num_attention_heads, -2)) # (batch_size, attention_heads, target_length, source_length)
-        attention_scores = mx.sym.mean(attention_scores, axis=1) # (batch_size, target_length, source_length)
+        attention_scores = attention_scores.reshape(shape=(-4, -1, num_attention_heads, -2), name="_mono_loss_reshape1") # (batch_size, attention_heads, target_length, source_length)
+        attention_scores = mx.sym.mean(attention_scores, axis=1, name="_mono_loss_mean1") # (batch_size, target_length, source_length)
         
         # take dot product of positional attention and actual positions
-        source_positions = mx.contrib.sym.arange_like(data=source_words, start=1, axis=1) # (src_len,), needs mxnet-1.6!
+        source_positions = mx.contrib.sym.arange_like(data=source_words, start=1, axis=1, name="_mono_loss_arange_like1") # (src_len,), needs mxnet-1.6!
         if absolute_positions:
-            positions = mx.sym.broadcast_mul(mx.sym.ones_like(attention_scores), source_positions)
+            positions = mx.sym.broadcast_mul(mx.sym.ones_like(attention_scores), source_positions, name="_mono_loss_broad_mul1")
         else:
-            weighted_source_positions = mx.sym.dot(positional_attention, source_positions) # (batch, src_len)
-            weighted_source_positions = weighted_source_positions.expand_dims(axis=1) # (batch, 1, src_len)
+            weighted_source_positions = mx.sym.dot(positional_attention, source_positions, name="_mono_loss_broad_dot1") # (batch, src_len)
+            weighted_source_positions = weighted_source_positions.expand_dims(axis=1, name="_mono_loss_broad_expand1") # (batch, 1, src_len)
             p = mx.sym.ones_like(attention_scores) # (batch_size, target_length, source_length)
-            positions = mx.sym.broadcast_mul(p, weighted_source_positions) # shape(batch, target_length, source_length), values in source_length = arange(source_length) * positional_attention
+            positions = mx.sym.broadcast_mul(p, weighted_source_positions, name="_mono_loss_broad_mul2") # shape(batch, target_length, source_length), values in source_length = arange(source_length) * positional_attention
         
         # no need to remove padding from source, padded positions are 0 in attention scores
-        positionally_weighted_attention = mx.sym.broadcast_mul(attention_scores, positions) # shape(batch_size, target_length, source_length (attention_score*position))
+        positionally_weighted_attention = mx.sym.broadcast_mul(attention_scores, positions, name="_mono_loss_broad_mul3") # shape(batch_size, target_length, source_length (attention_score*position))
         # take average over sequences
-        avg = mx.sym.sum(positionally_weighted_attention, axis=2) # shape (batch, target_length)
+        avg = mx.sym.sum(positionally_weighted_attention, axis=2, name="_mono_loss_broad_sum1") # shape (batch, target_length)
         
         ### set padded positions in target to zero (we dont care about alignment scores from padded tokens)
         mask = (target_words != C.PAD_ID) # target_words (batch_size, target_length), mask: 0 where padded, 1 otherwise
-        avg_r = avg.reshape(shape=(-3,))
-        avg = mx.sym.broadcast_mul(avg_r, mask).reshape_like(avg)
+        avg_r = avg.reshape(shape=(-3,), name="_mono_loss_broad_reshape2")
+        avg = mx.sym.broadcast_mul(avg_r, mask).reshape_like(avg, name="_mono_loss_broad_reshape3")
         
-        shifted_avg = mx.sym.slice_axis(avg, axis=-1, begin=1, end=None) # (batch_size, target_length-1)
-        padding = mx.sym.slice_axis(mx.sym.zeros_like(shifted_avg), axis=-1, begin=0, end=1) # (batch_size, 1)
-        shifted_avg = mx.sym.concat(shifted_avg, padding, dim=-1) # (batch_size, target_length)
+        shifted_avg = mx.sym.slice_axis(avg, axis=-1, begin=1, end=None, name="_mono_loss_broad_slice1") # (batch_size, target_length-1)
+        padding = mx.sym.slice_axis(mx.sym.zeros_like(shifted_avg), axis=-1, begin=0, end=1, name="_mono_loss_broad_slice2") # (batch_size, 1)
+        shifted_avg = mx.sym.concat(shifted_avg, padding, dim=-1, name="_mono_loss_broad_concat1") # (batch_size, target_length)
         
         ## in shifted avg: one more padded position (since shifted to left), create new mask and apply to adjacent_pos_difference
         shifted_mask = (shifted_avg != 0)
@@ -332,6 +332,7 @@ class MonotoneAttention(Loss):
         if not absolute_positions:
             ## set loss for non-English pairs to 0
             # if target and source language is not English, set loss == 0
+            #print("non en id {}, en trg id {}".format(self.loss_config.non_en_id, self.loss_config.en_trg_id))
             en_trg_mask = (source_words == self.loss_config.en_trg_id) # (batch, src_len), 1 if <2en> present, 0 if <2en> not present
             en_trg_mask = mx.sym.sum(en_trg_mask, axis=1) 
             non_en_trg_mask = (en_trg_mask == 0) # (batch, src_len), 0 if <2en> present, 1 if <2en> not present
@@ -345,16 +346,20 @@ class MonotoneAttention(Loss):
         
         # loss= max(0, avg(y)-avg(y+1)), if y-(y+1) >0, this is the loss, else if y-(y+1) < 0, loss=0
         # with margin: loss= max(0, (avg(y)-avg(y+1))+margin ), if (y-(y+1))+margin >0, this is the loss, else if (y-(y+1))+margin < 0, loss=0
-        adjacent_pos_difference = mx.sym.broadcast_maximum(lhs=mx.sym.zeros_like(adjacent_pos_difference), rhs=adjacent_pos_difference)
+        adjacent_pos_difference = mx.sym.broadcast_maximum(lhs=mx.sym.zeros_like(adjacent_pos_difference), rhs=adjacent_pos_difference, name="_mono_loss_broad_max")
         
-        layer_loss = mx.sym.sum(adjacent_pos_difference, axis=1) # (batch, )
+        layer_loss = mx.sym.sum(adjacent_pos_difference, axis=1, name="_mono_loss_broad_sum2") # (batch, )
         
         # normalize by valid tokens
         mask = (avg !=0 )
-        num_valid_positions = mx.sym.sum(mask, axis=1)
-        layer_loss = mx.sym.broadcast_div(layer_loss, num_valid_positions)
+        num_valid_positions = mx.sym.sum(mask, axis=1, name="_mono_loss_broad_sum3")
+        ## add epsilon to num_valid_positions positions to avoid div by zero
+        epsilon = 1e-8
+        num_valid_positions = num_valid_positions + epsilon
+        layer_loss = mx.sym.broadcast_div(layer_loss, num_valid_positions, name="_mono_loss_broad_div")
         
         return layer_loss
+        #return layer_loss, source_positions ,avg, shifted_avg, adjacent_pos_difference, num_valid_positions
     
     def create_metric(self) -> "MonotonoeAttentionMetric":
         return MonotoneAttentionMetric(self.loss_config)

@@ -706,7 +706,7 @@ def create_model_config(args: argparse.Namespace,
                                   normalization_type=args.loss_normalization_type,
                                   label_smoothing=args.label_smoothing)
     
-    monotonicity_config_loss = None
+    attention_monotonicity_config_loss = None
     if args.attention_monotonicity is not None:
         attention_monotonicity_config_loss = loss.LossConfig(name='monotone-attention-loss',
                                   vocab_size=None,

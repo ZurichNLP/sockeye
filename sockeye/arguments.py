@@ -1176,7 +1176,7 @@ def add_learned_positions_args(params):
     params = params.add_argument_group("Parameters for learning multilingual positional embeddings")
     params.add_argument('--attention-monotonicity',
                               type=str,
-                              default=C.LEARNED_MULTILINGUAL_POSITIONS,
+                              default=None,
                               help="Use additional loss to encourage monotone decoder-encoder attention. Positions are either absolute (simple monotonicity loss) or learned (learned reordering with additional sublayer in last encoder layer). Default: %(default)s")
     params.add_argument('--attention-monotonicity-loss-lambda',
                               type=float,
