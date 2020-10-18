@@ -275,7 +275,6 @@ class MonotoneAttention(Loss):
         return mx.sym.MakeLoss(total_loss,
                                 grad_scale=grad_scale)
     
-    
     def monotonicity_score_per_layer(self, 
                                      attention_scores: mx.sym.Symbol,
                                      positional_attention: mx.sym.Symbol,
@@ -293,8 +292,9 @@ class MonotoneAttention(Loss):
         """
         
         # take average of attention_heads on each position
-        attention_scores = attention_scores.reshape(shape=(-4, -1, num_attention_heads, -2), name="_mono_loss_reshape1") # (batch_size, attention_heads, target_length, source_length)
-        attention_scores = mx.sym.mean(attention_scores, axis=1, name="_mono_loss_mean1") # (batch_size, target_length, source_length)
+        if num_attention_heads >1:
+            attention_scores = attention_scores.reshape(shape=(-4, -1, num_attention_heads, -2), name="_mono_loss_reshape1") # (batch_size, attention_heads, target_length, source_length)
+            attention_scores = mx.sym.mean(attention_scores, axis=1, name="_mono_loss_mean1") # (batch_size, target_length, source_length)
         
         # take dot product of positional attention and actual positions
         source_positions = mx.contrib.sym.arange_like(data=source_words, start=1, axis=1, name="_mono_loss_arange_like1") # (src_len,), needs mxnet-1.6!
@@ -351,17 +351,16 @@ class MonotoneAttention(Loss):
         layer_loss = mx.sym.sum(adjacent_pos_difference, axis=1, name="_mono_loss_broad_sum2") # (batch, )
         
         # normalize by valid tokens
-        mask = (avg !=0 )
-        num_valid_positions = mx.sym.sum(mask, axis=1, name="_mono_loss_broad_sum3")
-        ## add epsilon to num_valid_positions positions to avoid div by zero
+        valid = mask.reshape_like(avg)
+        num_valid_positions = mx.sym.sum(valid, axis=1, name="_mono_loss_broad_sum3")
+        ## add epsilon to num_valid_positions positions to avoid div by zero (can happen due to attention-dropout)
         epsilon = 1e-8
         num_valid_positions = num_valid_positions + epsilon
         layer_loss = mx.sym.broadcast_div(layer_loss, num_valid_positions, name="_mono_loss_broad_div")
         
         return layer_loss
-        #return layer_loss, source_positions ,avg, shifted_avg, adjacent_pos_difference, num_valid_positions
     
-    def create_metric(self) -> "MonotonoeAttentionMetric":
+    def create_metric(self) -> "MonotoneAttentionMetric":
         return MonotoneAttentionMetric(self.loss_config)
         
 
