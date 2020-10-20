@@ -221,10 +221,13 @@ class ScoringModel(model.SockeyeModel):
             sums = sums - self.brevity_penalty(target_length - 1, length_ratio * source_encoded_length)
             
             if self.attention_monotonicity_scorer is not None:
+                num_attention_heads = 1
+                if hasattr(self.config.config_decoder, "attention_heads"):
+                    num_attention_heads = self.config.config_decoder.attention_heads 
                 if self.attention_monotonicity == "learned":
                     attention_monotonicity_scores = self.attention_monotonicity_scorer.get_loss(attention_scores_list=attention_scores_list,
                                                                                     positional_attention=position_probs,
-                                                                                    num_attention_heads=self.config.config_decoder.attention_heads,
+                                                                                    num_attention_heads=num_attention_heads,
                                                                                     target_words=target_words, 
                                                                                     source_words=source_words,
                                                                                     margin=self.attention_monotonicity_scoring_margin,
@@ -233,7 +236,7 @@ class ScoringModel(model.SockeyeModel):
                 else:
                     attention_monotonicity_scores = self.attention_monotonicity_scorer.get_loss(attention_scores_list=attention_scores_list,
                                                                                     positional_attention=None,
-                                                                                    num_attention_heads=self.config.config_decoder.attention_heads,
+                                                                                    num_attention_heads=num_attention_heads,
                                                                                     target_words=target_words, 
                                                                                     source_words=source_words,
                                                                                     margin=self.attention_monotonicity_scoring_margin,
