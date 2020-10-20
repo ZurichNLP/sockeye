@@ -109,8 +109,8 @@ def check_arg_compatibility(args: argparse.Namespace):
                         "Attention monotonicity loss with learned reordering only available with transformer decoder. Embedding type needs to be 'learned'.")
         
     if args.attention_monotonicity == C.ABSOLUTE_MULTILINGUAL_POSITIONS:
-        check_condition(args.decoder == C.TRANSFORMER_TYPE,
-                        "Attention monotonicity loss only available with transformer decoder.")
+        check_condition(args.decoder == C.TRANSFORMER_TYPE or args.decoder == C.RNN_NAME,
+                        "Attention monotonicity loss only available with transformer or rnn decoder.")
 
 
 def check_resume(args: argparse.Namespace, output_folder: str) -> bool:

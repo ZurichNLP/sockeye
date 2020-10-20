@@ -206,10 +206,13 @@ class TrainingModel(model.SockeyeModel):
             
             
             if self._attention_monotonicity is not None:
+                num_attention_heads = 1
+                if hasattr(self.config.config_decoder, attention_heads):
+                    num_attention_heads = self.config.config_decoder.attention_heads 
                 if self._attention_monotonicity == "learned":
                     loss_attention= [self.attention_monotonicity_loss.get_loss(attention_scores_list=attention_scores_list,
                                                                                     positional_attention=position_probs,
-                                                                                    num_attention_heads=self.config.config_decoder.attention_heads,
+                                                                                    num_attention_heads=num_attention_heads,
                                                                                     target_words=target_words, 
                                                                                     source_words=source_words,
                                                                                     grad_scale=self._attention_monotonicity_loss_lambda,
@@ -218,27 +221,17 @@ class TrainingModel(model.SockeyeModel):
                 elif self._attention_monotonicity == "absolute":
                     loss_attention= [self.attention_monotonicity_loss.get_loss(attention_scores_list=attention_scores_list,
                                                                                     positional_attention=None,
-                                                                                    num_attention_heads=self.config.config_decoder.attention_heads,
+                                                                                    num_attention_heads=num_attention_heads,
                                                                                     target_words=target_words, 
                                                                                     source_words=source_words,
                                                                                     grad_scale=self._attention_monotonicity_loss_lambda,
                                                                                     margin=self._attention_monotonicity_loss_margin,
                                                                                     absolute_positions=True)]
-                    
+                
                 return mx.sym.Group(net_outputs + loss_attention), data_names, label_names
             else:
                 return mx.sym.Group(net_outputs), data_names, label_names
             
-            #loss_attention, test1, test2, test3, test4, test5 = self.attention_monotonicity_loss.get_loss(attention_scores_list=attention_scores_list,
-                                                                                #positional_attention=None,
-                                                                                #num_attention_heads=self.config.config_decoder.attention_heads,
-                                                                                #target_words=target_words, 
-                                                                                #source_words=source_words,
-                                                                                #grad_scale=self._attention_monotonicity_loss_lambda,
-                                                                                #margin=self._attention_monotonicity_loss_margin,
-                                                                                #absolute_positions=True)
-            #debug = [mx.sym.MakeLoss(test1),mx.sym.MakeLoss(test2),mx.sym.MakeLoss(test3), mx.sym.MakeLoss(test4), mx.sym.MakeLoss(test5), mx.sym.MakeLoss(attention_scores_list[-1])]
-            #return mx.sym.Group(net_outputs + [loss_attention] +debug), data_names, label_names
 
         # Fix model parameters as needed for different training options.
         utils.check_condition(not self.config.lhuc or self.fixed_param_strategy is None,
@@ -969,12 +962,6 @@ class EarlyStoppingTrainer:
         # Forward & Backward
         ####################
         model.run_forward_backward(batch, metric_train)
-        #for i,o in enumerate( model.module.get_outputs()):
-            #print("i ", i)
-            #print(o)
-            #name = "array_" +str(i)
-            #mx.nd.save(name, o)
-        #exit(0)
         # If using an extended optimizer, provide extra state information about the current batch
         optimizer = model.optimizer
         if metric_loss is not None and isinstance(optimizer, SockeyeOptimizer):

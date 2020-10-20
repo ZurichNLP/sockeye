@@ -275,6 +275,7 @@ class MonotoneAttention(Loss):
         return mx.sym.MakeLoss(total_loss,
                                 grad_scale=grad_scale)
     
+    
     def monotonicity_score_per_layer(self, 
                                      attention_scores: mx.sym.Symbol,
                                      positional_attention: mx.sym.Symbol,
