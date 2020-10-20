@@ -207,7 +207,7 @@ class TrainingModel(model.SockeyeModel):
             
             if self._attention_monotonicity is not None:
                 num_attention_heads = 1
-                if hasattr(self.config.config_decoder, attention_heads):
+                if hasattr(self.config.config_decoder, "attention_heads"):
                     num_attention_heads = self.config.config_decoder.attention_heads 
                 if self._attention_monotonicity == "learned":
                     loss_attention= [self.attention_monotonicity_loss.get_loss(attention_scores_list=attention_scores_list,
@@ -231,7 +231,6 @@ class TrainingModel(model.SockeyeModel):
                 return mx.sym.Group(net_outputs + loss_attention), data_names, label_names
             else:
                 return mx.sym.Group(net_outputs), data_names, label_names
-            
 
         # Fix model parameters as needed for different training options.
         utils.check_condition(not self.config.lhuc or self.fixed_param_strategy is None,
