@@ -170,6 +170,8 @@ class CheckpointDecoder:
                                                      offset=0.01),
                 C.CHRF_VAL: evaluate.raw_corpus_chrf(hypotheses=translations,
                                                      references=self.target_sentences),
+                C.PER_VAL: evaluate.raw_corpus_per(hypotheses=translations,
+                                                     references=self.target_sentences),
                 C.ROUGE_1_VAL: evaluate.raw_corpus_rouge1(hypotheses=translations,
                                                           references=self.target_sentences),
                 C.ROUGE_2_VAL: evaluate.raw_corpus_rouge2(hypotheses=translations,

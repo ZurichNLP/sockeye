@@ -102,6 +102,54 @@ def raw_corpus_length_ratio(hypotheses: Iterable[str], references: Iterable[str]
     ratios = [len(h.split())/len(r.split()) for h, r in zip(hypotheses, references)]
     return sum(ratios)/len(ratios) if len(ratios) else 0.0
 
+def edit_distance(str1, str2):
+    '''Simple Levenshtein implementation for eval.'''
+    table = np.zeros([len(str2) + 1, len(str1) + 1])
+    for i in range(1, len(str2) + 1):
+        table[i][0] = table[i - 1][0] + 1
+    for j in range(1, len(str1) + 1):
+        table[0][j] = table[0][j - 1] + 1
+    for i in range(1, len(str2) + 1):
+        for j in range(1, len(str1) + 1):
+            if str1[j - 1] == str2[i - 1]:
+                dg = 0
+            else:
+                dg = 1
+            table[i][j] = min(table[i - 1][j] + 1, table[i][j - 1] + 1,
+                              table[i - 1][j - 1] + dg)
+    return int(table[len(str2)][len(str1)])
+
+def evaluate_per(predict, ground_truth):
+    '''
+    evaluate single instance
+    '''
+    correct = 1
+    if len(predict) == len(ground_truth):
+        for elem1, elem2 in zip(predict, ground_truth):
+            if elem1 != elem2:
+                correct = 0
+                break
+    else:
+        correct = 0
+    dist = edit_distance(predict, ground_truth)
+    return correct, dist/len(ground_truth)
+    
+def raw_corpus_per(hypotheses: Iterable[str], references: Iterable[str]) -> float:
+    """
+    Phoneme Error Rate (character-based models). Code from https://github.com/shijie-wu/neural-transducer. 
+
+    :param hypotheses: Hypotheses stream.
+    :param references: Reference stream.
+    :return: PER score as float between 0 and 1 (0.0 = best)
+    """
+    total = 0
+    total_per = 0
+    for pred, ref in zip(hypotheses, references):
+        total +=1
+        correct, per = evaluate_per(pred, ref)
+        total_per += per
+    return (total_per/total)
+
 
 def main():
     params = argparse.ArgumentParser(description='Evaluate translations by calculating metrics with '
@@ -146,6 +194,8 @@ def main():
             func = raw_corpus_rouge2
         elif name == C.ROUGEL:
             func = raw_corpus_rougel
+        elif name == C.PER:
+            func = raw_corpus_per
         else:
             raise ValueError("Unknown metric %s." % name)
         metrics.append((name, func))
