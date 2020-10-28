@@ -308,7 +308,6 @@ class Scorer:
             if self.model.attention_monotonicity_scoring:
                 attention_monotonicity_scores = output[2]
             
-
             batch_time = time.time() - batch_tic
             total_time += batch_time
 

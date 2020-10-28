@@ -111,6 +111,10 @@ def check_arg_compatibility(args: argparse.Namespace):
     if args.attention_monotonicity == C.ABSOLUTE_MULTILINGUAL_POSITIONS:
         check_condition(args.decoder == C.TRANSFORMER_TYPE or args.decoder == C.RNN_NAME,
                         "Attention monotonicity loss only available with transformer or rnn decoder.")
+        if args.monotonicity_on_first_n_heads:
+            check_condition(args.monotonicity_on_first_n_heads <= args.transformer_attention_heads[1] or args.monotonicity_on_first_n_heads <= args.rnn_attention_mhdot_heads,
+                        "Attention monotonicity loss on first n heads, n cannot be larger than --transformer-attention-heads (use -1 to apply loss to all attention heads).")
+        
 
 
 def check_resume(args: argparse.Namespace, output_folder: str) -> bool:
@@ -714,7 +718,8 @@ def create_model_config(args: argparse.Namespace,
                                   label_smoothing=None,
                                   en_trg_id=en_trg_id, 
                                   non_en_id=non_en_id,
-                                  margin=args.attention_monotonicity_loss_margin)
+                                  margin=args.attention_monotonicity_loss_margin,
+                                  monotonicity_on_first_n_heads=args.monotonicity_on_first_n_heads)
 
     if args.length_task is not None:
         config_length_task = layers.LengthRatioConfig(num_layers=args.length_task_layers, weight=args.length_task_weight)
@@ -775,7 +780,8 @@ def create_training_model(config: model.ModelConfig,
                                             fixed_param_strategy=args.fixed_param_strategy,
                                             attention_monotonicity=args.attention_monotonicity,
                                             attention_monotonicity_loss_lambda=args.attention_monotonicity_loss_lambda,
-                                            attention_monotonicity_loss_margin=args.attention_monotonicity_loss_margin)
+                                            attention_monotonicity_loss_margin=args.attention_monotonicity_loss_margin,
+                                            monotonicity_on_first_n_heads=args.monotonicity_on_first_n_heads)
         
     
     

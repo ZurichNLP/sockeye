@@ -1186,6 +1186,10 @@ def add_learned_positions_args(params):
                               type=float,
                               default=1.0,
                               help='Expected margin for attention increase to be considered monotone (for both learned positional reordering and absolute positions). Default: %(default)s.')
+    params.add_argument('--monotonicity-on-first-n-heads',
+                              type=int,
+                              default=-1,
+                              help='Apply monotonicity loss only to first n attention heads (only applicable with multi-head attention). Apply loss to all heads: -1. Default: %(default)s.')
     params.add_argument('--sublayer-context',
                               choices=C.SUBLAYER_CONTEXT_CHOICES,
                               default=C.SUBLAYER_CONTEXT_ADD,

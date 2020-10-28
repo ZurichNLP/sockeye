@@ -48,7 +48,8 @@ class LossConfig(config.Config):
                  length_task_weight: float = 1.0, 
                  en_trg_id: Optional[int] = None,
                  non_en_id: Optional[int] = None,
-                 margin: Optional[float] = None) -> None:
+                 margin: Optional[float] = None,
+                 monotonicity_on_first_n_heads: Optional[int] = None) -> None:
         super().__init__()
         self.name = name
         self.vocab_size = vocab_size
@@ -59,7 +60,7 @@ class LossConfig(config.Config):
         self.en_trg_id = en_trg_id
         self.non_en_id = non_en_id
         self.margin = margin
-        
+        self.monotonicity_on_first_n_heads = monotonicity_on_first_n_heads
 
 
 def get_loss(config: LossConfig) -> 'Loss':
@@ -263,18 +264,18 @@ class MonotoneAttention(Loss):
                  source_words: mx.sym.Symbol,
                  grad_scale: Optional[float] = 0.5,
                  margin: Optional[float] = 1.0,
+                 monotonicity_on_first_n_heads: Optional[int] = -1,
                  absolute_positions: Optional[bool] = False) -> List[mx.sym.Symbol]:
         
         
         
-        total_loss = self.monotonicity_score_per_layer(attention_scores_list[0], positional_attention, num_attention_heads, target_words, source_words, margin, absolute_positions)
+        total_loss = self.monotonicity_score_per_layer(attention_scores_list[0], positional_attention, num_attention_heads, target_words, source_words, margin, monotonicity_on_first_n_heads, absolute_positions)
         
         for layer in range(1, len(attention_scores_list)):
-            loss = self.monotonicity_score_per_layer(attention_scores_list[layer], positional_attention, num_attention_heads, target_words, source_words, margin, absolute_positions)
+            loss = self.monotonicity_score_per_layer(attention_scores_list[layer], positional_attention, num_attention_heads, target_words, source_words, margin, monotonicity_on_first_n_heads, absolute_positions)
             total_loss = mx.sym.broadcast_add(total_loss, loss)
         return mx.sym.MakeLoss(total_loss,
                                 grad_scale=grad_scale)
-    
     
     def monotonicity_score_per_layer(self, 
                                      attention_scores: mx.sym.Symbol,
@@ -283,19 +284,30 @@ class MonotoneAttention(Loss):
                                      target_words: mx.sym.Symbol, 
                                      source_words: mx.sym.Symbol,
                                      margin: float,
+                                     monotonicity_on_first_n_heads: int,
                                      absolute_positions: bool):
         """
         :param attention_scores: decoder-encoder attention scores (MultiHeadAttention). Shape (batch_size * attention_heads, target_length, source_length)
         :param positional_attention: Attention from encoder layer hidden states (after self-attention) to positions. Shape (batch, src_len, pos_len=src_len)
         :param target_words: target words, used to remove padding. Shape (batch_size * target_length)
-        :param source: source sentences. Symbol of shape(batch, src_len, num_factors).
+        :param source_words: source sentences. Symbol of shape(batch, src_len, num_factors).
+        :param margin: margin for increase in attention to be considered monotone. 
+        :param monotonicity_on_first_n_heads: apply monotonicity loss only to first n heads (only applicable with multi-head attention).
         :param default_bucket_key: Tuple of (max_source_length, max_target_length). Need max_source_length to create position matrix with arange.
         """
         
         # take average of attention_heads on each position
+        ## TODO: implement for --rnn-attention-mhdot-heads
         if num_attention_heads >1:
             attention_scores = attention_scores.reshape(shape=(-4, -1, num_attention_heads, -2), name="_mono_loss_reshape1") # (batch_size, attention_heads, target_length, source_length)
+            ## only use first n attention heads to calculate the loss
+            if monotonicity_on_first_n_heads > 0:
+                attention_scores = mx.sym.slice_axis(attention_scores, axis=1, begin=0, end=monotonicity_on_first_n_heads)
+            elif monotonicity_on_first_n_heads == 0:
+                logger.error("First n heads to calculate monotonicity loss set to 0. Run without --attention-monotonicity or set lambda to 0.0.")
+                exit(1)
             attention_scores = mx.sym.mean(attention_scores, axis=1, name="_mono_loss_mean1") # (batch_size, target_length, source_length)
+            
         
         # take dot product of positional attention and actual positions
         source_positions = mx.contrib.sym.arange_like(data=source_words, start=1, axis=1, name="_mono_loss_arange_like1") # (src_len,), needs mxnet-1.6!
