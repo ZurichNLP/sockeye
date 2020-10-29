@@ -146,7 +146,7 @@ def raw_corpus_per(hypotheses: Iterable[str], references: Iterable[str]) -> floa
     total_per = 0
     for pred, ref in zip(hypotheses, references):
         total +=1
-        correct, per = evaluate_per(pred, ref)
+        correct, per = evaluate_per(pred.rstrip(), ref.rstrip())
         total_per += per
     return (total_per/total)
 
