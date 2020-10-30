@@ -63,7 +63,7 @@ class CheckpointDecoder:
                  model: str,
                  max_input_len: Optional[int] = None,
                  batch_size: int = 16,
-                 beam_size: int = C.DEFAULT_BEAM_SIZE,
+                 beam_size: Optional[int] = C.DEFAULT_BEAM_SIZE,
                  nbest_size: int = C.DEFAULT_NBEST_SIZE,
                  bucket_width_source: int = 10,
                  length_penalty_alpha: float = 1.0,

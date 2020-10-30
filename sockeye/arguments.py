@@ -1190,6 +1190,10 @@ def add_learned_positions_args(params):
                               type=int,
                               default=-1,
                               help='Apply monotonicity loss only to first n attention heads (only applicable with multi-head attention). Apply loss to all heads: -1. Default: %(default)s.')
+    params.add_argument('--checkpoint-decoder-beam-size',
+                              type=int,
+                              default=5,
+                              help='Beam size for checkpoint decoding. Default: %(default)s.')
     params.add_argument('--sublayer-context',
                               choices=C.SUBLAYER_CONTEXT_CHOICES,
                               default=C.SUBLAYER_CONTEXT_ADD,
