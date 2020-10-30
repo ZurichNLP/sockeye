@@ -276,6 +276,7 @@ class MonotoneAttention(Loss):
             total_loss = mx.sym.broadcast_add(total_loss, loss)
         return mx.sym.MakeLoss(total_loss,
                                 grad_scale=grad_scale)
+        
     
     def monotonicity_score_per_layer(self, 
                                      attention_scores: mx.sym.Symbol,
@@ -326,8 +327,8 @@ class MonotoneAttention(Loss):
         
         ### set padded positions in target to zero (we dont care about alignment scores from padded tokens)
         mask = (target_words != C.PAD_ID) # target_words (batch_size, target_length), mask: 0 where padded, 1 otherwise
-        avg_r = avg.reshape(shape=(-3,), name="_mono_loss_broad_reshape2")
-        avg = mx.sym.broadcast_mul(avg_r, mask).reshape_like(avg, name="_mono_loss_broad_reshape3")
+        valid_t = mask.reshape_like(avg)
+        avg = mx.sym.broadcast_mul(avg, valid_t, name="_mono_loss_broad_mul4")
         
         shifted_avg = mx.sym.slice_axis(avg, axis=-1, begin=1, end=None, name="_mono_loss_broad_slice1") # (batch_size, target_length-1)
         padding = mx.sym.slice_axis(mx.sym.zeros_like(shifted_avg), axis=-1, begin=0, end=1, name="_mono_loss_broad_slice2") # (batch_size, 1)
@@ -335,7 +336,17 @@ class MonotoneAttention(Loss):
         
         ## in shifted avg: one more padded position (since shifted to left), create new mask and apply to adjacent_pos_difference
         shifted_mask = (shifted_avg != 0)
-        margin = mx.sym.ones_like(shifted_avg) *margin
+        ## margin: scale with length difference between source and target: margin *  |x|/|y|
+        num_valid_positions_t = mx.sym.sum(valid_t, axis=1, name="_mono_loss_broad_sum3")
+        ## add epsilon to num_valid_positions positions to avoid div by zero (can happen due to attention-dropout)
+        epsilon = 1e-8
+        num_valid_positions_t = num_valid_positions_t + epsilon
+        valid_s = (source_words != C.PAD_ID) # source words: shape (batch, src_len, num_factors)
+        num_valid_positions_s = mx.sym.sum(valid_s, axis=1, name="_mono_loss_broad_sum4")
+        scale = mx.sym.broadcast_div(num_valid_positions_s, num_valid_positions_t)
+        scaled_margin = margin * scale ## (batch, )
+        trg_len_ones = mx.sym.ones_like(shifted_avg).slice_axis(axis=0, begin=0, end=None) ## (1, trg_len)
+        margin = mx.sym.broadcast_mul(scaled_margin.expand_dims(axis=1), trg_len_ones, name="_mono_loss_broad_mul5")
         shifted_avg = shifted_avg - margin
         
         adjacent_pos_difference = avg - shifted_avg # (batch, target_length)
@@ -363,13 +374,8 @@ class MonotoneAttention(Loss):
         
         layer_loss = mx.sym.sum(adjacent_pos_difference, axis=1, name="_mono_loss_broad_sum2") # (batch, )
         
-        # normalize by valid tokens
-        valid = mask.reshape_like(avg)
-        num_valid_positions = mx.sym.sum(valid, axis=1, name="_mono_loss_broad_sum3")
-        ## add epsilon to num_valid_positions positions to avoid div by zero (can happen due to attention-dropout)
-        epsilon = 1e-8
-        num_valid_positions = num_valid_positions + epsilon
-        layer_loss = mx.sym.broadcast_div(layer_loss, num_valid_positions, name="_mono_loss_broad_div")
+        # normalize by valid tokens in target
+        layer_loss = mx.sym.broadcast_div(layer_loss, num_valid_positions_t, name="_mono_loss_broad_div")
         
         return layer_loss
     
