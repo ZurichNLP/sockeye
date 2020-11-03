@@ -49,7 +49,7 @@ class LossConfig(config.Config):
                  en_trg_id: Optional[int] = None,
                  non_en_id: Optional[int] = None,
                  margin: Optional[float] = None,
-                 monotonicity_on_first_n_heads: Optional[int] = None) -> None:
+                 monotonicity_on_heads: Optional[int] = None) -> None:
         super().__init__()
         self.name = name
         self.vocab_size = vocab_size
@@ -60,7 +60,7 @@ class LossConfig(config.Config):
         self.en_trg_id = en_trg_id
         self.non_en_id = non_en_id
         self.margin = margin
-        self.monotonicity_on_first_n_heads = monotonicity_on_first_n_heads
+        self.monotonicity_on_heads = monotonicity_on_heads
 
 
 def get_loss(config: LossConfig) -> 'Loss':
@@ -262,21 +262,27 @@ class MonotoneAttention(Loss):
                  num_attention_heads: int,
                  target_words: mx.sym.Symbol,
                  source_words: mx.sym.Symbol,
+                 s_t_length_ratio: mx.sym.Symbol,
+                 target_length: mx.sym.Symbol,
                  grad_scale: Optional[float] = 0.5,
                  margin: Optional[float] = 1.0,
-                 monotonicity_on_first_n_heads: Optional[int] = -1,
+                 monotonicity_on_heads: Optional[Tuple[int, int]] = None,
                  absolute_positions: Optional[bool] = False) -> List[mx.sym.Symbol]:
         
         
         
-        total_loss = self.monotonicity_score_per_layer(attention_scores_list[0], positional_attention, num_attention_heads, target_words, source_words, margin, monotonicity_on_first_n_heads, absolute_positions)
+        total_loss= self.monotonicity_score_per_layer(attention_scores_list[0], positional_attention, num_attention_heads, target_words, source_words, s_t_length_ratio, target_length, margin, monotonicity_on_heads, absolute_positions)
         
         for layer in range(1, len(attention_scores_list)):
-            loss = self.monotonicity_score_per_layer(attention_scores_list[layer], positional_attention, num_attention_heads, target_words, source_words, margin, monotonicity_on_first_n_heads, absolute_positions)
+            loss = self.monotonicity_score_per_layer(attention_scores_list[layer], positional_attention, num_attention_heads, target_words, source_words, s_t_length_ratio, target_length, margin, monotonicity_on_heads, absolute_positions)
             total_loss = mx.sym.broadcast_add(total_loss, loss)
-        return mx.sym.MakeLoss(total_loss,
+            
+        ## average layer loss
+        num_layers = mx.sym.ones_like(total_loss) * len(attention_scores_list)
+        avg_loss = mx.sym.broadcast_div(total_loss, num_layers, name="_mono_loss_broad_div3")
+        return mx.sym.MakeLoss(avg_loss,
                                 grad_scale=grad_scale)
-        
+    
     
     def monotonicity_score_per_layer(self, 
                                      attention_scores: mx.sym.Symbol,
@@ -284,99 +290,113 @@ class MonotoneAttention(Loss):
                                      num_attention_heads: int,
                                      target_words: mx.sym.Symbol, 
                                      source_words: mx.sym.Symbol,
+                                     s_t_length_ratio: mx.sym.Symbol,
+                                     target_length: mx.sym.Symbol,
                                      margin: float,
-                                     monotonicity_on_first_n_heads: int,
+                                     monotonicity_on_heads: Tuple[int, int],
                                      absolute_positions: bool):
         """
         :param attention_scores: decoder-encoder attention scores (MultiHeadAttention). Shape (batch_size * attention_heads, target_length, source_length)
         :param positional_attention: Attention from encoder layer hidden states (after self-attention) to positions. Shape (batch, src_len, pos_len=src_len)
         :param target_words: target words, used to remove padding. Shape (batch_size * target_length)
         :param source_words: source sentences. Symbol of shape(batch, src_len, num_factors).
+        :param s_t_length_ratio: |x|/|y|, source to target length ratios (no padding).
+        :param target_lengths:
         :param margin: margin for increase in attention to be considered monotone. 
-        :param monotonicity_on_first_n_heads: apply monotonicity loss only to first n heads (only applicable with multi-head attention).
-        :param default_bucket_key: Tuple of (max_source_length, max_target_length). Need max_source_length to create position matrix with arange.
+        :param monotonicity_on_heads: apply monotonicity loss only to n-m heads (only applicable with multi-head attention).
+        :param absolute_positions:
         """
         
         # take average of attention_heads on each position
         ## TODO: implement for --rnn-attention-mhdot-heads
+        ## default: calculate only on first head (rnn)
+        start = 0
+        end =1
         if num_attention_heads >1:
             attention_scores = attention_scores.reshape(shape=(-4, -1, num_attention_heads, -2), name="_mono_loss_reshape1") # (batch_size, attention_heads, target_length, source_length)
-            ## only use first n attention heads to calculate the loss
-            if monotonicity_on_first_n_heads > 0:
-                attention_scores = mx.sym.slice_axis(attention_scores, axis=1, begin=0, end=monotonicity_on_first_n_heads)
-            elif monotonicity_on_first_n_heads == 0:
-                logger.error("First n heads to calculate monotonicity loss set to 0. Run without --attention-monotonicity or set lambda to 0.0.")
-                exit(1)
-            attention_scores = mx.sym.mean(attention_scores, axis=1, name="_mono_loss_mean1") # (batch_size, target_length, source_length)
+            ## default: on all transformer heads
+            end = num_attention_heads
+            if monotonicity_on_heads is not None:
+                start, end = monotonicity_on_heads
+                start = start-1
+                if end > num_attention_heads:
+                    logger.error("Cannot use loss on head {} with num_attention_heads {}".format(end, num_attention_heads))
+                    exit(1)
+                    
+        ## calculate loss separately for each head, then take mean of loss
+        layer_loss = mx.sym.zeros_like(target_length) ## (batch_size, )
+        
+        for i in range(start, end):
+            if num_attention_heads > 1:
+                sliced_attention_scores = mx.sym.slice_axis(attention_scores, axis=1, begin=i, end=(i+1)).squeeze()
+            else:
+                sliced_attention_scores = attention_scores
+            ## take dot product of positional attention and actual positions
+            source_positions = mx.contrib.sym.arange_like(data=source_words, start=1, axis=1, name="_mono_loss_arange_like1") # (src_len,), needs mxnet-1.6!
+            if absolute_positions:
+                positions = mx.sym.broadcast_mul(mx.sym.ones_like(sliced_attention_scores), source_positions, name="_mono_loss_broad_mul1")
+            else:
+                weighted_source_positions = mx.sym.dot(positional_attention, source_positions, name="_mono_loss_broad_dot1") # (batch, src_len)
+                weighted_source_positions = weighted_source_positions.expand_dims(axis=1, name="_mono_loss_broad_expand1") # (batch, 1, src_len)
+                p = mx.sym.ones_like(sliced_attention_scores) # (batch_size, target_length, source_length)
+                positions = mx.sym.broadcast_mul(p, weighted_source_positions, name="_mono_loss_broad_mul2") # shape(batch, target_length, source_length), values in source_length = arange(source_length) * positional_attention
             
+            ## no need to remove padding from source, padded positions are 0 in attention scores
+            positionally_weighted_attention = mx.sym.broadcast_mul(sliced_attention_scores, positions, name="_mono_loss_broad_mul3") # shape(batch_size, target_length, source_length (attention_score*position))
+            # take average over sequences
+            avg = mx.sym.sum(positionally_weighted_attention, axis=2, name="_mono_loss_broad_sum1") # shape (batch, target_length)
+            
+            #### set padded positions in target to zero (we dont care about alignment scores from padded tokens)
+            mask = (target_words != C.PAD_ID) # target_words (batch_size, target_length), mask: 0 where padded, 1 otherwise
+            valid_t = mask.reshape_like(avg)
+            avg = mx.sym.broadcast_mul(avg, valid_t, name="_mono_loss_broad_mul4")
+            
+            shifted_avg = mx.sym.slice_axis(avg, axis=-1, begin=1, end=None, name="_mono_loss_broad_slice1") # (batch_size, target_length-1)
+            padding = mx.sym.slice_axis(mx.sym.zeros_like(shifted_avg), axis=-1, begin=0, end=1, name="_mono_loss_broad_slice2") # (batch_size, 1)
+            shifted_avg = mx.sym.concat(shifted_avg, padding, dim=-1, name="_mono_loss_broad_concat1") # (batch_size, target_length)
+            
+            ## in shifted avg: one more padded position (since shifted to left), create new mask and apply to adjacent_pos_difference
+            shifted_mask = (shifted_avg != 0)
+            ## margin: scale with length difference between source and target: margin *  |x|/|y|
+            scaled_margin = (margin * s_t_length_ratio).expand_dims(axis=1) ## (batch, 1)
+            trg_len_ones = mx.sym.ones_like(shifted_avg).slice_axis(axis=0, begin=0, end=1) ## (1, trg_len)
+            scaled_margin = mx.sym.broadcast_mul(scaled_margin, trg_len_ones, name="_mono_loss_broad_mul5")
+            shifted_avg = shifted_avg - scaled_margin
+            adjacent_pos_difference = avg - shifted_avg # (batch, target_length)
+            adjacent_pos_difference = adjacent_pos_difference * shifted_mask
+            
+            ## if learned reordered positions: mask zero-shot pairs for loss
+            if not absolute_positions:
+                ## set loss for non-English pairs to 0
+                # if target and source language is not English, set loss == 0
+                #print("non en id {}, en trg id {}".format(self.loss_config.non_en_id, self.loss_config.en_trg_id))
+                en_trg_mask = (source_words == self.loss_config.en_trg_id) # (batch, src_len), 1 if <2en> present, 0 if <2en> not present
+                en_trg_mask = mx.sym.sum(en_trg_mask, axis=1) 
+                non_en_trg_mask = (en_trg_mask == 0) # (batch, src_len), 0 if <2en> present, 1 if <2en> not present
+                en_src_mask = (source_words == self.loss_config.non_en_id) # (batch, src_len), 1 if <non_en> present, 0 if not <non_en> present
+                non_en_src_mask = mx.sym.sum(en_src_mask, axis=1) # (batch,)
+                mask_sum = non_en_trg_mask + non_en_src_mask 
+                non_en_pairs_mask = mx.sym.broadcast_equal(mask_sum, (mx.sym.ones(shape=(1)) *2 ) ) ## 1 where sum was 2, i.e. src + trg not English, 0 otherwise
+                non_en_pairs_mask_inv = (non_en_pairs_mask == 0)
+                non_en_pairs_mask_inv = mx.sym.expand_dims(non_en_pairs_mask_inv, axis=1)
+                adjacent_pos_difference =  mx.sym.broadcast_mul(non_en_pairs_mask_inv, adjacent_pos_difference, name="_mono_loss_broad_mul6")
+            
+            # loss= max(0, avg(y)-avg(y+1)), if y-(y+1) >0, this is the loss, else if y-(y+1) < 0, loss=0
+            # with margin: loss= max(0, (avg(y)-avg(y+1))+margin ), if (y-(y+1))+margin >0, this is the loss, else if (y-(y+1))+margin < 0, loss=0
+            adjacent_pos_difference = mx.sym.broadcast_maximum(lhs=mx.sym.zeros_like(adjacent_pos_difference), rhs=adjacent_pos_difference, name="_mono_loss_broad_max")
+            
+            head_loss = mx.sym.sum(adjacent_pos_difference, axis=1, name="_mono_loss_broad_sum2") # (batch, )
+            
+            # normalize by valid tokens in target
+            ## add epsilon to num_valid_positions positions to avoid div by zero (can happen with short sequences due to dropout)
+            epsilon = 1e-8
+            target_length = target_length + epsilon
+            head_loss = mx.sym.broadcast_div(head_loss, target_length, name="_mono_loss_broad_div")
+            layer_loss = mx.sym.broadcast_add(layer_loss, head_loss, name="_mono_loss_broad_add")
         
-        # take dot product of positional attention and actual positions
-        source_positions = mx.contrib.sym.arange_like(data=source_words, start=1, axis=1, name="_mono_loss_arange_like1") # (src_len,), needs mxnet-1.6!
-        if absolute_positions:
-            positions = mx.sym.broadcast_mul(mx.sym.ones_like(attention_scores), source_positions, name="_mono_loss_broad_mul1")
-        else:
-            weighted_source_positions = mx.sym.dot(positional_attention, source_positions, name="_mono_loss_broad_dot1") # (batch, src_len)
-            weighted_source_positions = weighted_source_positions.expand_dims(axis=1, name="_mono_loss_broad_expand1") # (batch, 1, src_len)
-            p = mx.sym.ones_like(attention_scores) # (batch_size, target_length, source_length)
-            positions = mx.sym.broadcast_mul(p, weighted_source_positions, name="_mono_loss_broad_mul2") # shape(batch, target_length, source_length), values in source_length = arange(source_length) * positional_attention
-        
-        # no need to remove padding from source, padded positions are 0 in attention scores
-        positionally_weighted_attention = mx.sym.broadcast_mul(attention_scores, positions, name="_mono_loss_broad_mul3") # shape(batch_size, target_length, source_length (attention_score*position))
-        # take average over sequences
-        avg = mx.sym.sum(positionally_weighted_attention, axis=2, name="_mono_loss_broad_sum1") # shape (batch, target_length)
-        
-        ### set padded positions in target to zero (we dont care about alignment scores from padded tokens)
-        mask = (target_words != C.PAD_ID) # target_words (batch_size, target_length), mask: 0 where padded, 1 otherwise
-        valid_t = mask.reshape_like(avg)
-        avg = mx.sym.broadcast_mul(avg, valid_t, name="_mono_loss_broad_mul4")
-        
-        shifted_avg = mx.sym.slice_axis(avg, axis=-1, begin=1, end=None, name="_mono_loss_broad_slice1") # (batch_size, target_length-1)
-        padding = mx.sym.slice_axis(mx.sym.zeros_like(shifted_avg), axis=-1, begin=0, end=1, name="_mono_loss_broad_slice2") # (batch_size, 1)
-        shifted_avg = mx.sym.concat(shifted_avg, padding, dim=-1, name="_mono_loss_broad_concat1") # (batch_size, target_length)
-        
-        ## in shifted avg: one more padded position (since shifted to left), create new mask and apply to adjacent_pos_difference
-        shifted_mask = (shifted_avg != 0)
-        ## margin: scale with length difference between source and target: margin *  |x|/|y|
-        num_valid_positions_t = mx.sym.sum(valid_t, axis=1, name="_mono_loss_broad_sum3")
-        ## add epsilon to num_valid_positions positions to avoid div by zero (can happen due to attention-dropout)
-        epsilon = 1e-8
-        num_valid_positions_t = num_valid_positions_t + epsilon
-        valid_s = (source_words != C.PAD_ID) # source words: shape (batch, src_len, num_factors)
-        num_valid_positions_s = mx.sym.sum(valid_s, axis=1, name="_mono_loss_broad_sum4")
-        scale = mx.sym.broadcast_div(num_valid_positions_s, num_valid_positions_t)
-        scaled_margin = margin * scale ## (batch, )
-        trg_len_ones = mx.sym.ones_like(shifted_avg).slice_axis(axis=0, begin=0, end=None) ## (1, trg_len)
-        margin = mx.sym.broadcast_mul(scaled_margin.expand_dims(axis=1), trg_len_ones, name="_mono_loss_broad_mul5")
-        shifted_avg = shifted_avg - margin
-        
-        adjacent_pos_difference = avg - shifted_avg # (batch, target_length)
-        adjacent_pos_difference = adjacent_pos_difference * shifted_mask
-        
-        ## if learned reordered positions: mask zero-shot pairs for loss
-        if not absolute_positions:
-            ## set loss for non-English pairs to 0
-            # if target and source language is not English, set loss == 0
-            #print("non en id {}, en trg id {}".format(self.loss_config.non_en_id, self.loss_config.en_trg_id))
-            en_trg_mask = (source_words == self.loss_config.en_trg_id) # (batch, src_len), 1 if <2en> present, 0 if <2en> not present
-            en_trg_mask = mx.sym.sum(en_trg_mask, axis=1) 
-            non_en_trg_mask = (en_trg_mask == 0) # (batch, src_len), 0 if <2en> present, 1 if <2en> not present
-            en_src_mask = (source_words == self.loss_config.non_en_id) # (batch, src_len), 1 if <non_en> present, 0 if not <non_en> present
-            non_en_src_mask = mx.sym.sum(en_src_mask, axis=1) # (batch,)
-            mask_sum = non_en_trg_mask + non_en_src_mask 
-            non_en_pairs_mask = mx.sym.broadcast_equal(mask_sum, (mx.sym.ones(shape=(1)) *2 ) ) ## 1 where sum was 2, i.e. src + trg not English, 0 otherwise
-            non_en_pairs_mask_inv = (non_en_pairs_mask == 0)
-            non_en_pairs_mask_inv = mx.sym.expand_dims(non_en_pairs_mask_inv, axis=1)
-            adjacent_pos_difference =  mx.sym.broadcast_mul(non_en_pairs_mask_inv, adjacent_pos_difference)
-        
-        # loss= max(0, avg(y)-avg(y+1)), if y-(y+1) >0, this is the loss, else if y-(y+1) < 0, loss=0
-        # with margin: loss= max(0, (avg(y)-avg(y+1))+margin ), if (y-(y+1))+margin >0, this is the loss, else if (y-(y+1))+margin < 0, loss=0
-        adjacent_pos_difference = mx.sym.broadcast_maximum(lhs=mx.sym.zeros_like(adjacent_pos_difference), rhs=adjacent_pos_difference, name="_mono_loss_broad_max")
-        
-        layer_loss = mx.sym.sum(adjacent_pos_difference, axis=1, name="_mono_loss_broad_sum2") # (batch, )
-        
-        # normalize by valid tokens in target
-        layer_loss = mx.sym.broadcast_div(layer_loss, num_valid_positions_t, name="_mono_loss_broad_div")
-        
+        heads = end-start
+        heads =  mx.sym.ones_like(layer_loss) * heads
+        layer_loss = mx.sym.broadcast_div(layer_loss, heads, name="_mono_loss_broad_div2")
         return layer_loss
     
     def create_metric(self) -> "MonotoneAttentionMetric":

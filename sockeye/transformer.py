@@ -195,7 +195,7 @@ class TransformerDecoderBlock(mx.gluon.HybridBlock):
         target_self_att = self.self_attention(self.pre_self_attention(target, None), None, target_bias, cache)
         target = self.post_self_attention(target_self_att, target)
 
-        # encoder attention, shape (batch, query_max_length, output_depth)
+        # target_enc_att: shape (batch, query_max_length, output_depth), attention_scores: (batch*heads, query_length, key_length)
         target_enc_att, attention_scores = self.enc_attention(self.pre_enc_attention(target, None), source, None, source_bias)
         target = self.post_enc_attention(target_enc_att, target)
 

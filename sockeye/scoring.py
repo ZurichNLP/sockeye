@@ -69,6 +69,7 @@ class ScoringModel(model.SockeyeModel):
                  constant_length_ratio: float = 0.0,
                  attention_monotonicity_scoring: Optional[bool] = False,
                  attention_monotonicity_scoring_margin: Optional[float] = 1.0,
+                 monotonicity_on_heads: Optional[Tuple[int,int]] = None,
                  attention_monotonicity: Optional[str] = None) -> None:
         super().__init__(config)
         self.context = context
@@ -78,6 +79,7 @@ class ScoringModel(model.SockeyeModel):
         self.softmax_temperature = softmax_temperature
         self.attention_monotonicity_scoring = attention_monotonicity_scoring
         self.attention_monotonicity_scoring_margin = attention_monotonicity_scoring_margin
+        self.monotonicity_on_heads = monotonicity_on_heads
         self.attention_monotonicity = attention_monotonicity # learned or absolute
 
         if brevity_penalty_type == C.BREVITY_PENALTY_CONSTANT:
@@ -230,7 +232,10 @@ class ScoringModel(model.SockeyeModel):
                                                                                     num_attention_heads=num_attention_heads,
                                                                                     target_words=target_words, 
                                                                                     source_words=source_words,
+                                                                                    s_t_length_ratio=mx.sym.broadcast_div(source_length, target_length),
+                                                                                    target_length=target_length,
                                                                                     margin=self.attention_monotonicity_scoring_margin,
+                                                                                    monotonicity_on_heads=self.monotonicity_on_heads,
                                                                                     absolute_positions=False,
                                                                                     grad_scale=1.0) # TODO: or use lambda from self.config for scaled scores?
                 else:
@@ -239,7 +244,10 @@ class ScoringModel(model.SockeyeModel):
                                                                                     num_attention_heads=num_attention_heads,
                                                                                     target_words=target_words, 
                                                                                     source_words=source_words,
+                                                                                    s_t_length_ratio=mx.sym.broadcast_div(source_length, target_length),
+                                                                                    target_length=target_length,
                                                                                     margin=self.attention_monotonicity_scoring_margin,
+                                                                                    monotonicity_on_heads=self.monotonicity_on_heads,
                                                                                     absolute_positions=True,
                                                                                     grad_scale=1.0)
                 return mx.sym.Group([sums, target_dists, attention_monotonicity_scores] ), data_names, label_names
@@ -307,7 +315,6 @@ class Scorer:
             attention_monotonicity_scores = mx.nd.zeros_like(scores)
             if self.model.attention_monotonicity_scoring:
                 attention_monotonicity_scores = output[2]
-            
             batch_time = time.time() - batch_tic
             total_time += batch_time
 

@@ -1048,7 +1048,7 @@ def add_training_args(params):
                               default=C.EMBED_INIT_DEFAULT,
                               choices=C.EMBED_INIT_TYPES,
                               help='Type of embedding matrix weight initialization. If normal, initializes embedding '
-                                   'weights using a normal distribution with std=1/srqt(vocab_size). '
+                                   'weights using a normal distribution with std=1/srqt(num_embed). '
                                    'Default: %(default)s.')
     train_params.add_argument('--initial-learning-rate',
                               type=float,
@@ -1186,10 +1186,10 @@ def add_learned_positions_args(params):
                               type=float,
                               default=1.0,
                               help='Expected margin for attention increase to be considered monotone (for both learned positional reordering and absolute positions). Default: %(default)s.')
-    params.add_argument('--monotonicity-on-first-n-heads',
-                              type=int,
-                              default=-1,
-                              help='Apply monotonicity loss only to first n attention heads (only applicable with multi-head attention). Apply loss to all heads: -1. Default: %(default)s.')
+    params.add_argument('--monotonicity-on-heads',
+                              type=multiple_values(num_values=2, greater_or_equal=1),
+                              default=None,
+                              help='Apply monotonicity loss only to attention heads specified with m-n, e.g. 1:1 will score only first head, 2:4 will score heads 2, 3 and 4 (only applicable with multi-head attention). If not set: apply loss to all heads: None. Default: %(default)s.')
     params.add_argument('--checkpoint-decoder-beam-size',
                               type=int,
                               default=5,
@@ -1207,6 +1207,10 @@ def add_attention_monotonicity_scoring_args(params):
     params.add_argument('--attention-monotonicity-scoring-margin',
                               type=float,
                               help="Margin for scoring with monotonicity of attention. Default: Use margin from model config.")
+    params.add_argument('--monotonicity-scoring-on-heads',
+                              type=multiple_values(num_values=2, greater_or_equal=1),
+                              default=None,
+                              help='Score monotonicity loss only on specified attention heads with m-n, e.g. 1:1 will score only first head, 2:4 will score heads 2, 3 and 4 (only applicable with multi-head attention). If not set: score loss on all heads. Default: %(default)s.')
 
 def add_train_cli_args(params):
     add_training_io_args(params)

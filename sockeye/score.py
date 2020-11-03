@@ -143,6 +143,7 @@ def score(args: argparse.Namespace):
                                              constant_length_ratio=args.brevity_penalty_constant_length_ratio,
                                              attention_monotonicity_scoring=args.attention_monotonicity_scoring,
                                              attention_monotonicity_scoring_margin=attention_monotonicity_scoring_margin,
+                                             monotonicity_on_heads=args.monotonicity_scoring_on_heads,
                                              attention_monotonicity=attention_monotonicity)
 
         scorer = scoring.Scorer(scoring_model, source_vocabs, target_vocab)
