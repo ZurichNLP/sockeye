@@ -1186,6 +1186,9 @@ def add_learned_positions_args(params):
                               type=float,
                               default=1.0,
                               help='Expected margin for attention increase to be considered monotone (for both learned positional reordering and absolute positions). Default: %(default)s.')
+    params.add_argument('--attention-monotonicity-loss-double-normalize',
+                              action='store_true',
+                              help='Normalize loss by valid target positions in batch twice.')
     params.add_argument('--monotonicity-on-heads',
                               type=multiple_values(num_values=2, greater_or_equal=1),
                               default=None,

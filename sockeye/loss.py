@@ -267,14 +267,15 @@ class MonotoneAttention(Loss):
                  grad_scale: Optional[float] = 0.5,
                  margin: Optional[float] = 1.0,
                  monotonicity_on_heads: Optional[Tuple[int, int]] = None,
-                 absolute_positions: Optional[bool] = False) -> List[mx.sym.Symbol]:
+                 absolute_positions: Optional[bool] = False,
+                 monotonicity_loss_double_normalize: Optional[bool] = False) -> List[mx.sym.Symbol]:
         
         
         
-        total_loss= self.monotonicity_score_per_layer(attention_scores_list[0], positional_attention, num_attention_heads, target_words, source_words, s_t_length_ratio, target_length, margin, monotonicity_on_heads, absolute_positions)
+        total_loss= self.monotonicity_score_per_layer(attention_scores_list[0], positional_attention, num_attention_heads, target_words, source_words, s_t_length_ratio, target_length, margin, monotonicity_on_heads, absolute_positions, monotonicity_loss_double_normalize)
         
         for layer in range(1, len(attention_scores_list)):
-            loss = self.monotonicity_score_per_layer(attention_scores_list[layer], positional_attention, num_attention_heads, target_words, source_words, s_t_length_ratio, target_length, margin, monotonicity_on_heads, absolute_positions)
+            loss = self.monotonicity_score_per_layer(attention_scores_list[layer], positional_attention, num_attention_heads, target_words, source_words, s_t_length_ratio, target_length, margin, monotonicity_on_heads, absolute_positions, monotonicity_loss_double_normalize)
             total_loss = mx.sym.broadcast_add(total_loss, loss)
             
         ## average layer loss
@@ -294,7 +295,8 @@ class MonotoneAttention(Loss):
                                      target_length: mx.sym.Symbol,
                                      margin: float,
                                      monotonicity_on_heads: Tuple[int, int],
-                                     absolute_positions: bool):
+                                     absolute_positions: bool,
+                                     monotonicity_loss_double_normalize: bool):
         """
         :param attention_scores: decoder-encoder attention scores (MultiHeadAttention). Shape (batch_size * attention_heads, target_length, source_length)
         :param positional_attention: Attention from encoder layer hidden states (after self-attention) to positions. Shape (batch, src_len, pos_len=src_len)
@@ -392,6 +394,8 @@ class MonotoneAttention(Loss):
             epsilon = 1e-8
             target_length = target_length + epsilon
             head_loss = mx.sym.broadcast_div(head_loss, target_length, name="_mono_loss_broad_div")
+            if monotonicity_loss_double_normalize:
+                head_loss = mx.sym.broadcast_div(head_loss, target_length, name="_mono_loss_broad_div2")
             layer_loss = mx.sym.broadcast_add(layer_loss, head_loss, name="_mono_loss_broad_add")
         
         heads = end-start

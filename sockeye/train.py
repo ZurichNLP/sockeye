@@ -782,7 +782,8 @@ def create_training_model(config: model.ModelConfig,
                                             attention_monotonicity=args.attention_monotonicity,
                                             attention_monotonicity_loss_lambda=args.attention_monotonicity_loss_lambda,
                                             attention_monotonicity_loss_margin=args.attention_monotonicity_loss_margin,
-                                            monotonicity_on_heads=args.monotonicity_on_heads)
+                                            monotonicity_on_heads=args.monotonicity_on_heads,
+                                            monotonicity_loss_double_normalize=args.attention_monotonicity_loss_double_normalize)
         
     
     
