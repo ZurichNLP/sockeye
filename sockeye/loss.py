@@ -267,19 +267,28 @@ class MonotoneAttention(Loss):
                  grad_scale: Optional[float] = 0.5,
                  margin: Optional[float] = 1.0,
                  monotonicity_on_heads: Optional[Tuple[int, int]] = None,
+                 monotonicity_on_layers: Optional[Tuple[int, int]] = None,
                  absolute_positions: Optional[bool] = False,
                  monotonicity_loss_double_normalize: Optional[bool] = False) -> List[mx.sym.Symbol]:
         
         
+        total_loss = mx.sym.zeros_like(target_length)
+        start = 0
+        end = len(attention_scores_list)
+        if monotonicity_on_layers is not None:
+            start, end = monotonicity_on_layers
+            start -= 1
+            if end > len(attention_scores_list):
+                logger.error("Cannot calculate loss on layer {} in a model with {} decoder layers.".format(end, len(attention_scores_list)))
+                exit(1)
         
-        total_loss= self.monotonicity_score_per_layer(attention_scores_list[0], positional_attention, num_attention_heads, target_words, source_words, s_t_length_ratio, target_length, margin, monotonicity_on_heads, absolute_positions, monotonicity_loss_double_normalize)
-        
-        for layer in range(1, len(attention_scores_list)):
+        for layer in range(start, end):
             loss = self.monotonicity_score_per_layer(attention_scores_list[layer], positional_attention, num_attention_heads, target_words, source_words, s_t_length_ratio, target_length, margin, monotonicity_on_heads, absolute_positions, monotonicity_loss_double_normalize)
             total_loss = mx.sym.broadcast_add(total_loss, loss)
             
         ## average layer loss
-        num_layers = mx.sym.ones_like(total_loss) * len(attention_scores_list)
+        num_layers = end-start
+        num_layers = mx.sym.ones_like(total_loss) * num_layers
         avg_loss = mx.sym.broadcast_div(total_loss, num_layers, name="_mono_loss_broad_div3")
         return mx.sym.MakeLoss(avg_loss,
                                 grad_scale=grad_scale)
@@ -327,6 +336,7 @@ class MonotoneAttention(Loss):
                     
         ## calculate loss separately for each head, then take mean of loss
         layer_loss = mx.sym.zeros_like(target_length) ## (batch_size, )
+        source_positions = mx.contrib.sym.arange_like(data=source_words, start=1, axis=1, name="_mono_loss_arange_like1") # (src_len,), needs mxnet-1.6!
         
         for i in range(start, end):
             if num_attention_heads > 1:
@@ -334,7 +344,6 @@ class MonotoneAttention(Loss):
             else:
                 sliced_attention_scores = attention_scores
             ## take dot product of positional attention and actual positions
-            source_positions = mx.contrib.sym.arange_like(data=source_words, start=1, axis=1, name="_mono_loss_arange_like1") # (src_len,), needs mxnet-1.6!
             if absolute_positions:
                 positions = mx.sym.broadcast_mul(mx.sym.ones_like(sliced_attention_scores), source_positions, name="_mono_loss_broad_mul1")
             else:

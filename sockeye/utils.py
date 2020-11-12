@@ -391,6 +391,37 @@ def plot_attention(attention_matrix: np.ndarray, source_tokens: List[str], targe
     plt.savefig(filename)
     logger.info("Saved alignment visualization to " + filename)
 
+def plot_attention_mono_loss(attention_matrix: np.ndarray, source_tokens: List[str], target_tokens: List[str], filename: str, score: Optional[float] = None):
+    """
+    Uses matplotlib for creating a visualization of the attention matrix.
+
+    :param attention_matrix: The attention matrix.
+    :param source_tokens: A list of source tokens.
+    :param target_tokens: A list of target tokens.
+    :param filename: The file to which the attention visualization will be written to.
+    """
+    try:
+        import matplotlib
+    except ImportError:
+        raise RuntimeError("Please install matplotlib.")
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    assert attention_matrix.shape[0] == len(target_tokens)
+
+    plt.imshow(attention_matrix.transpose(), interpolation="nearest", cmap="Greys")
+    plt.xlabel("target")
+    plt.ylabel("source")
+    plt.gca().set_xticks([i for i in range(0, len(target_tokens))])
+    plt.gca().set_yticks([i for i in range(0, len(source_tokens))])
+    plt.gca().set_xticklabels(target_tokens, rotation='vertical')
+    plt.gca().set_yticklabels(source_tokens)
+    plt.tight_layout()
+    if score is not None:
+        plt.figtext(0.5, 0.01, str(score), wrap=True, horizontalalignment='center')
+    plt.savefig(filename)
+    plt.clf()
+    logger.info("Saved alignment visualization to " + filename)
+
 
 def print_attention_text(attention_matrix: np.ndarray, source_tokens: List[str], target_tokens: List[str],
                          threshold: float):

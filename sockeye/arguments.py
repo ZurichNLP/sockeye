@@ -1193,6 +1193,10 @@ def add_learned_positions_args(params):
                               type=multiple_values(num_values=2, greater_or_equal=1),
                               default=None,
                               help='Apply monotonicity loss only to attention heads specified with m-n, e.g. 1:1 will score only first head, 2:4 will score heads 2, 3 and 4 (only applicable with multi-head attention). If not set: apply loss to all heads: None. Default: %(default)s.')
+    params.add_argument('--monotonicity-on-layers',
+                              type=multiple_values(num_values=2, greater_or_equal=1),
+                              default=None,
+                              help='Calculate monotonicity loss only on specified layers m-n, e.g. 1:1 will score only first layer, 2:4 will score layers 2, 3 and 4. If not set: calculate loss on all layers. Default: %(default)s.')
     params.add_argument('--checkpoint-decoder-beam-size',
                               type=int,
                               default=5,
@@ -1214,6 +1218,13 @@ def add_attention_monotonicity_scoring_args(params):
                               type=multiple_values(num_values=2, greater_or_equal=1),
                               default=None,
                               help='Score monotonicity loss only on specified attention heads with m-n, e.g. 1:1 will score only first head, 2:4 will score heads 2, 3 and 4 (only applicable with multi-head attention). If not set: score loss on all heads. Default: %(default)s.')
+    params.add_argument('--monotonicity-scoring-on-layers',
+                              type=multiple_values(num_values=2, greater_or_equal=1),
+                              default=None,
+                              help='Score monotonicity loss only on specified layers m-n, e.g. 1:1 will score only first layer, 2:4 will score layers 2, 3 and 4. If not set: score loss on all layers. Default: %(default)s.')
+    params.add_argument('--print-attention-scores',
+                              action='store_true',
+                              help="Plot attention scores (per layer/per head).")
 
 def add_train_cli_args(params):
     add_training_io_args(params)
