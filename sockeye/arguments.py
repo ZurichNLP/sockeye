@@ -1190,6 +1190,10 @@ def add_learned_positions_args(params):
                               type=multiple_values(num_values=2, greater_or_equal=1),
                               default=None,
                               help='Apply monotonicity loss only to attention heads specified with m-n, e.g. 1:1 will score only first head, 2:4 will score heads 2, 3 and 4 (only applicable with multi-head attention). If not set: apply loss to all heads: None. Default: %(default)s.')
+    params.add_argument('--attention-monotonicity-ignore-prefix',
+                              action="store_true",
+                              help='Only compute average position for monotonicity loss on source tokens after <sep>. If not set: compute average positions over all source tokens.')
+
     params.add_argument('--checkpoint-decoder-beam-size',
                               type=int,
                               default=5,
@@ -1198,7 +1202,7 @@ def add_learned_positions_args(params):
                               choices=C.SUBLAYER_CONTEXT_CHOICES,
                               default=C.SUBLAYER_CONTEXT_ADD,
                               help='How to combine output of MHA in reordering sublayer with non-English positional embeddings. Default: %(default)s.')
-    
+
 def add_attention_monotonicity_scoring_args(params):
     params = params.add_argument_group("Parameters for scoring monotonicity with attention on positional embeddings")
     params.add_argument('--attention-monotonicity-scoring',
@@ -1428,7 +1432,7 @@ def add_inference_args(params):
                                default=0.9,
                                type=float,
                                help='Threshold to consider a soft alignment a sure alignment. Default: %(default)s.')
-    
+
 
     # common params with score CLI
     add_length_penalty_args(decode_params)
