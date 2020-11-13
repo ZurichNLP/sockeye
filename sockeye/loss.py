@@ -341,7 +341,7 @@ class MonotoneAttention(Loss):
 
         # TODO only works with absolute positions
         # if prefix should be ignored: mask everything before and including separator token out for loss
-        if self.loss_config.separator_id:
+        if hasattr(self.loss_config, "separator_id"):
             # get source tokens without factor dimension
             # TODO does not work with multiple factors
             source_tokens = source_words.squeeze() # (batch, src_len)
@@ -378,7 +378,7 @@ class MonotoneAttention(Loss):
 
             # TODO only works with absolute positions
             # if prefix should be ignored: mask everything before and including separator token out for loss
-            if self.loss_config.separator_id:
+            if hasattr(self.loss_config, "separator_id"):
                 # update positions to be 0 for <sep> token
                 separator_pos = separator_ids.expand_dims(axis=1, name="mono_loss_exp_sep").expand_dims(axis=2, name="mono_loss_exp_sep")  # (batch, 1, 1)
                 separator_pos = mx.sym.broadcast_mul(mx.sym.ones_like(positions), separator_pos, name="mono_loss_broad_mul_sep2") # (batch, trg_len, src_len)

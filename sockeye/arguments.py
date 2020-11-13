@@ -1228,6 +1228,10 @@ def add_attention_monotonicity_scoring_args(params):
     params.add_argument('--print-attention-scores',
                               action='store_true',
                               help="Plot attention scores (per layer/per head).")
+    params.add_argument('--checkpoint', '-c',
+                               default=None,
+                               type=int,
+                               help='Score with specified checkpoint.')
 
 def add_train_cli_args(params):
     add_training_io_args(params)

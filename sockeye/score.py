@@ -145,7 +145,8 @@ def score(args: argparse.Namespace):
                                              attention_monotonicity_scoring_margin=attention_monotonicity_scoring_margin,
                                              monotonicity_on_heads=args.monotonicity_scoring_on_heads,
                                              monotonicity_on_layers=args.monotonicity_scoring_on_layers,
-                                             attention_monotonicity=attention_monotonicity)
+                                             attention_monotonicity=attention_monotonicity,
+                                             checkpoint=args.checkpoint)
 
         scorer = scoring.Scorer(scoring_model, source_vocabs, target_vocab)
         if args.print_attention_scores:

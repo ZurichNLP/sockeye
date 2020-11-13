@@ -71,7 +71,8 @@ class ScoringModel(model.SockeyeModel):
                  attention_monotonicity_scoring_margin: Optional[float] = 1.0,
                  monotonicity_on_heads: Optional[Tuple[int,int]] = None,
                  monotonicity_on_layers: Optional[Tuple[int,int]] = None,
-                 attention_monotonicity: Optional[str] = None) -> None:
+                 attention_monotonicity: Optional[str] = None,
+                 checkpoint: Optional[int] = None) -> None:
         super().__init__(config)
         self.context = context
         self.score_type = score_type
@@ -83,6 +84,7 @@ class ScoringModel(model.SockeyeModel):
         self.monotonicity_on_heads = monotonicity_on_heads
         self.monotonicity_on_layers = monotonicity_on_layers
         self.attention_monotonicity = attention_monotonicity # learned or absolute
+        self.checkpoint = checkpoint
 
         if brevity_penalty_type == C.BREVITY_PENALTY_CONSTANT:
             if constant_length_ratio <= 0.0:
@@ -97,6 +99,8 @@ class ScoringModel(model.SockeyeModel):
 
         # Load model parameters into graph
         params_fname = os.path.join(model_dir, C.PARAMS_BEST_NAME)
+        if self.checkpoint is not None:
+            params_fname = os.path.join(model_dir, C.PARAMS_NAME % self.checkpoint)
         super().load_params_from_file(params_fname)
         self.module.set_params(arg_params=self.params,
                                aux_params=self.aux_params,
@@ -234,7 +238,7 @@ class ScoringModel(model.SockeyeModel):
                                                                                     num_attention_heads=num_attention_heads,
                                                                                     target_words=target_words, 
                                                                                     source_words=source_words,
-                                                                                    s_t_length_ratio=mx.sym.broadcast_div(source_length, target_length),
+                                                                                    source_length=source_length,
                                                                                     target_length=target_length,
                                                                                     margin=self.attention_monotonicity_scoring_margin,
                                                                                     monotonicity_on_heads=self.monotonicity_on_heads,
@@ -247,7 +251,7 @@ class ScoringModel(model.SockeyeModel):
                                                                                     num_attention_heads=num_attention_heads,
                                                                                     target_words=target_words, 
                                                                                     source_words=source_words,
-                                                                                    s_t_length_ratio=mx.sym.broadcast_div(source_length, target_length),
+                                                                                    source_length=source_length,
                                                                                     target_length=target_length,
                                                                                     margin=self.attention_monotonicity_scoring_margin,
                                                                                     monotonicity_on_heads=self.monotonicity_on_heads,
