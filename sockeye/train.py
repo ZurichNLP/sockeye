@@ -99,22 +99,22 @@ def check_arg_compatibility(args: argparse.Namespace):
     if args.decoder_only:
         check_condition(args.decoder != C.TRANSFORMER_TYPE and args.decoder != C.CONVOLUTION_TYPE,
                         "Decoder pre-training currently supports RNN decoders only.")
-    
+
     if args.attention_based_copying:
         check_condition(args.decoder == C.RNN_NAME,
                         "The attention-based copying mechanism currently supports RNN decoders only.")
-        
+
     if args.attention_monotonicity == C.LEARNED_MULTILINGUAL_POSITIONS:
         check_condition(args.decoder == C.TRANSFORMER_TYPE and args.transformer_positional_embedding_type == C.LEARNED_POSITIONAL_EMBEDDING,
                         "Attention monotonicity loss with learned reordering only available with transformer decoder. Embedding type needs to be 'learned'.")
-        
+
     if args.attention_monotonicity == C.ABSOLUTE_MULTILINGUAL_POSITIONS:
         check_condition(args.decoder == C.TRANSFORMER_TYPE or args.decoder == C.RNN_NAME,
                         "Attention monotonicity loss only available with transformer or rnn decoder.")
         if args.monotonicity_on_heads is not None:
             check_condition(args.monotonicity_on_heads[1] <= args.transformer_attention_heads[1],
                         "Attention monotonicity loss on n-m heads, m cannot be larger than --transformer-attention-heads for decoder (use None to apply loss to all attention heads).")
-        
+
 
 
 def check_resume(args: argparse.Namespace, output_folder: str) -> bool:
@@ -197,7 +197,7 @@ def create_checkpoint_decoder(args: argparse.Namespace,
                                                 inputs=[args.validation_source] + args.validation_source_factors,
                                                 references=args.validation_target,
                                                 model=args.output,
-                                                sample_size=sample_size, 
+                                                sample_size=sample_size,
                                                 beam_size=args.checkpoint_decoder_beam_size)
 
 
@@ -641,9 +641,10 @@ def create_model_config(args: argparse.Namespace,
                         target_vocab_size: int,
                         max_seq_len_source: int,
                         max_seq_len_target: int,
-                        config_data: data_io.DataConfig, 
+                        config_data: data_io.DataConfig,
                         non_en_id: Optional[int] = None,
-                        en_trg_id: Optional[int] = None) -> model.ModelConfig:
+                        en_trg_id: Optional[int] = None,
+                        separator_id: Optional[int] = None) -> model.ModelConfig:
     """
     Create a ModelConfig from the argument given in the command line.
 
@@ -710,15 +711,16 @@ def create_model_config(args: argparse.Namespace,
                                   vocab_size=target_vocab_size,
                                   normalization_type=args.loss_normalization_type,
                                   label_smoothing=args.label_smoothing)
-    
+
     attention_monotonicity_config_loss = None
     if args.attention_monotonicity is not None:
         attention_monotonicity_config_loss = loss.LossConfig(name='monotone-attention-loss',
                                   vocab_size=None,
                                   normalization_type=None,
                                   label_smoothing=None,
-                                  en_trg_id=en_trg_id, 
+                                  en_trg_id=en_trg_id,
                                   non_en_id=non_en_id,
+                                  separator_id=separator_id,
                                   margin=args.attention_monotonicity_loss_margin,
                                   monotonicity_on_heads=args.monotonicity_on_heads)
 
@@ -767,7 +769,7 @@ def create_training_model(config: model.ModelConfig,
     :param args: Arguments as returned by argparse.
     :return: The training model.
     """
-    
+
     training_model = training.TrainingModel(config=config,
                                             context=context,
                                             output_dir=output_dir,
@@ -785,9 +787,9 @@ def create_training_model(config: model.ModelConfig,
                                             monotonicity_on_heads=args.monotonicity_on_heads,
                                             monotonicity_on_layers=args.monotonicity_on_layers,
                                             monotonicity_loss_double_normalize=args.attention_monotonicity_loss_double_normalize)
-        
-    
-    
+
+
+
 
     return training_model
 
@@ -888,7 +890,7 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
                                   during training in a custom way. It should accept a dictionary of
                                   metric name -> metric value pairs and a global_step/checkpoint parameter.
     :param checkpoint_callback: An optional callback function (int -> None). The function will be called
-                                each time a checkpoint has been reached 
+                                each time a checkpoint has been reached
     """
     if args.dry_run:
         # Modify arguments so that we write to a temporary directory and
@@ -943,12 +945,16 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
             output_folder=output_folder)
         max_seq_len_source = config_data.max_seq_len_source
         max_seq_len_target = config_data.max_seq_len_target
-        
+
         non_en_id = None
         en_trg_id = None
         if args.attention_monotonicity == C.LEARNED_MULTILINGUAL_POSITIONS:
             non_en_id = source_vocabs[0][C.NON_EN_SYMBOL]
             en_trg_id = source_vocabs[0][C.EN_TRG_ID]
+
+        separator_id = None
+        if args.attention_monotonicity_ignore_prefix:
+            separator_id = source_vocabs[0][C.SEP_ID]
 
         # Dump the vocabularies if we're just starting up
         if not resume_training:
@@ -966,7 +972,8 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
                                            max_seq_len_source=max_seq_len_source, max_seq_len_target=max_seq_len_target,
                                            config_data=config_data,
                                            non_en_id=non_en_id,
-                                           en_trg_id=en_trg_id)
+                                           en_trg_id=en_trg_id,
+                                           separator_id=separator_id)
         model_config.freeze()
 
         training_model = create_training_model(config=model_config,

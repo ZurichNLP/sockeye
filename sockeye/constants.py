@@ -25,6 +25,7 @@ UNK_SYMBOL = "<unk>"
 PAD_SYMBOL = "<pad>"
 NON_EN_SYMBOL = "<non_en>"
 EN_TRG_ID = "<2en>"
+SEP_ID = "<sep>"
 PAD_ID = 0
 PAD_FORMAT = "<pad%d>"
 POINTER_FORMAT = "<ptr%d>"
