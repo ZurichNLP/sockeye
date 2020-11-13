@@ -285,7 +285,7 @@ class MonotoneAttention(Loss):
                 exit(1)
 
         for layer in range(start, end):
-            loss = self.monotonicity_score_per_layer(attention_scores_list[layer], positional_attention, num_attention_heads, target_words, source_words, s_t_length_ratio, target_length, margin, monotonicity_on_heads, absolute_positions, monotonicity_loss_double_normalize)
+            loss = self.monotonicity_score_per_layer(attention_scores_list[layer], positional_attention, num_attention_heads, target_words, source_words, source_length, target_length, margin, monotonicity_on_heads, absolute_positions, monotonicity_loss_double_normalize)
             total_loss = mx.sym.broadcast_add(total_loss, loss)
 
         ## average layer loss
