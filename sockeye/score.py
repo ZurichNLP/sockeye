@@ -144,13 +144,21 @@ def score(args: argparse.Namespace):
                                              attention_monotonicity_scoring=args.attention_monotonicity_scoring,
                                              attention_monotonicity_scoring_margin=attention_monotonicity_scoring_margin,
                                              monotonicity_on_heads=args.monotonicity_scoring_on_heads,
+                                             monotonicity_on_layers=args.monotonicity_scoring_on_layers,
                                              attention_monotonicity=attention_monotonicity)
 
         scorer = scoring.Scorer(scoring_model, source_vocabs, target_vocab)
-
-        scorer.score(score_iter=score_iter,
-                     output_handler=get_output_handler(output_type=args.output_type,
-                                                       output_fname=args.output))
+        if args.print_attention_scores:
+            if scoring_model.config.config_decoder.attention_heads > 1:
+                scorer.score(score_iter=score_iter,
+                            output_handler=get_output_handler(output_type=args.output_type,
+                                                            output_fname=args.output),
+                            attention_handler=get_output_handler(output_type=C.OUTPUT_HANDLER_ALIGN_PLOT_TRS,
+                                                            output_fname=args.output))
+        else:
+            scorer.score(score_iter=score_iter,
+                        output_handler=get_output_handler(output_type=args.output_type,
+                                                        output_fname=args.output))
 
 
 if __name__ == "__main__":

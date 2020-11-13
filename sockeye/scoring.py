@@ -70,6 +70,7 @@ class ScoringModel(model.SockeyeModel):
                  attention_monotonicity_scoring: Optional[bool] = False,
                  attention_monotonicity_scoring_margin: Optional[float] = 1.0,
                  monotonicity_on_heads: Optional[Tuple[int,int]] = None,
+                 monotonicity_on_layers: Optional[Tuple[int,int]] = None,
                  attention_monotonicity: Optional[str] = None) -> None:
         super().__init__(config)
         self.context = context
@@ -80,6 +81,7 @@ class ScoringModel(model.SockeyeModel):
         self.attention_monotonicity_scoring = attention_monotonicity_scoring
         self.attention_monotonicity_scoring_margin = attention_monotonicity_scoring_margin
         self.monotonicity_on_heads = monotonicity_on_heads
+        self.monotonicity_on_layers = monotonicity_on_layers
         self.attention_monotonicity = attention_monotonicity # learned or absolute
 
         if brevity_penalty_type == C.BREVITY_PENALTY_CONSTANT:
@@ -236,6 +238,7 @@ class ScoringModel(model.SockeyeModel):
                                                                                     target_length=target_length,
                                                                                     margin=self.attention_monotonicity_scoring_margin,
                                                                                     monotonicity_on_heads=self.monotonicity_on_heads,
+                                                                                    monotonicity_on_layers=self.monotonicity_on_layers,
                                                                                     absolute_positions=False,
                                                                                     grad_scale=1.0) # TODO: or use lambda from self.config for scaled scores?
                 else:
@@ -248,9 +251,10 @@ class ScoringModel(model.SockeyeModel):
                                                                                     target_length=target_length,
                                                                                     margin=self.attention_monotonicity_scoring_margin,
                                                                                     monotonicity_on_heads=self.monotonicity_on_heads,
+                                                                                    monotonicity_on_layers=self.monotonicity_on_layers,
                                                                                     absolute_positions=True,
                                                                                     grad_scale=1.0)
-                return mx.sym.Group([sums, target_dists, attention_monotonicity_scores] ), data_names, label_names
+                return mx.sym.Group([sums, target_dists, attention_monotonicity_scores] + attention_scores_list ), data_names, label_names
             # Return the sums and the target distributions
             # sums: (batch_size,) target_dists: (batch_size, target_seq_len, target_vocab_size)
             return mx.sym.Group([sums, target_dists]), data_names, label_names
@@ -301,7 +305,8 @@ class Scorer:
 
     def score(self,
               score_iter,
-              output_handler: OutputHandler):
+              output_handler: OutputHandler,
+              attention_handler: Optional[OutputHandler] = None):
 
         total_time = 0.
         sentence_no = 0
@@ -315,6 +320,15 @@ class Scorer:
             attention_monotonicity_scores = mx.nd.zeros_like(scores)
             if self.model.attention_monotonicity_scoring:
                 attention_monotonicity_scores = output[2]
+                num_attention_heads = 1
+                num_attention_heads = self.model.config.config_decoder.attention_heads
+                total_layers = self.model.config.config_decoder.num_layers
+                start_layer, end_layer = self.model.monotonicity_on_layers
+                layer_attention_list = []
+                for i in range(start_layer+2, end_layer+3): ## shift, output[2]=mono score
+                    layer_attention_list.append(output[i])
+            
+
             batch_time = time.time() - batch_tic
             total_time += batch_time
 
@@ -347,6 +361,38 @@ class Scorer:
                 output_handler.handle(TranslatorInput(sentence_no, source_tokens),
                                       TranslatorOutput(sentence_no, target_string, None, None, score, None, None, None, None, None, None, monotonicity_score), 
                                       batch_time)
+                
+                if attention_handler is not None:
+                    target_tokens = list(data_io.ids2tokens(target_ids, self.target_vocab_inv, self.exclude_list))
+                    target_tokens.insert(0, "BOS")
+                    source_tokens.append("EOS")
+                    #print(layer_attention_list)
+                    for layer_attention, i in zip(layer_attention_list, range(start_layer, end_layer+1)):                        
+                        if num_attention_heads > 1:
+                            # shape (batch * head, trg_len, src_len)
+                            # attention matrix for each head for this sample
+                            start = 1
+                            end = num_attention_heads
+                            if self.model.monotonicity_on_heads is not None:
+                                start, end = self.model.monotonicity_on_heads
+                            layer_attention = layer_attention.reshape(shape=(-4, -1, num_attention_heads, -2))
+                            for head in range(start-1, end):
+                                attention = layer_attention[(sentno-1)][head] ## trg_len, src_len, sentno starts at 1, need index to start at 0
+                                attention = attention.slice_axis(axis=0, begin=0, end=(len(target_tokens)) )
+                                attention = attention.slice_axis(axis=1, begin=0, end=(len(source_tokens)) )
+                                attention_handler.handle(t_input=TranslatorInput(sentence_no, source_tokens),
+                                              t_output=TranslatorOutput(sentence_no, target_string, target_tokens, attention.asnumpy(), score, None, None, None, None, None, None, monotonicity_score),
+                                              layer=i,
+                                              head=head+1)
+                                 
+                        else:
+                            attention = layer_attention[sentno] ## trg_len, src_len
+                            attention = attention.slice_axis(axis=0, begin=0, end=(len(target_tokens)) )
+                            attention = attention.slice_axis(axis=1, begin=0, end=(len(source_tokens)) )
+                            
+                            attention_handler.handle(t_input=TranslatorInput(sentence_no, source_tokens),
+                                              t_output=TranslatorOutput(sentence_no, target_string, target_tokens, attention.asnumpy(), score, None, None, None, None, None, None, monotonicity_score),
+                                              layer=i)
 
         if sentence_no != 0:
             logger.info("Processed %d lines in %d batches. Total time: %.4f, sec/sent: %.4f, sent/sec: %.4f",

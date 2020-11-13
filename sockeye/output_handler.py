@@ -19,7 +19,7 @@ from typing import Optional
 import sockeye.constants as C
 from . import data_io
 from . import inference
-from sockeye.utils import plot_attention, print_attention_text, get_alignments
+from sockeye.utils import plot_attention, plot_attention_mono_loss, print_attention_text, get_alignments
 
 
 def get_output_handler(output_type: str,
@@ -50,6 +50,8 @@ def get_output_handler(output_type: str,
         return BenchmarkOutputHandler(output_stream)
     elif output_type == C.OUTPUT_HANDLER_ALIGN_PLOT:
         return AlignPlotHandler(plot_prefix="align" if output_fname is None else output_fname)
+    elif output_type == C.OUTPUT_HANDLER_ALIGN_PLOT_TRS:
+        return TrsAlignPlotHandler(plot_prefix="align" if output_fname is None else output_fname)
     elif output_type == C.OUTPUT_HANDLER_ALIGN_TEXT:
         return AlignTextHandler(sure_align_threshold)
     elif output_type == C.OUTPUT_HANDLER_BEAM_STORE:
@@ -339,6 +341,44 @@ class AlignPlotHandler(OutputHandler):
                        t_input.tokens,
                        t_output.tokens,
                        "%s_%s.png" % (self.plot_prefix, t_input.sentence_id))
+
+    def reports_score(self) -> bool:
+        return False
+    
+
+class TrsAlignPlotHandler(OutputHandler):
+    """
+    Output handler to plot alignment matrices to PNG files.
+
+    :param plot_prefix: Prefix for generated PNG files.
+    """
+
+    def __init__(self, plot_prefix: str) -> None:
+        self.plot_prefix = plot_prefix
+
+    def handle(self,
+               t_input: inference.TranslatorInput,
+               t_output: inference.TranslatorOutput,
+               layer: int,
+               head: int = 0,
+               t_walltime: float = 0.):
+        """
+        :param t_input: Translator input.
+        :param t_output: Translator output.
+        :param t_walltime: Total wall-clock time for translation.
+        """
+        if head > 0:
+            plot_attention_mono_loss(t_output.attention_matrix,
+                        t_input.tokens,
+                        t_output.tokens,
+                        "%s_s%s_layer%s_head%s.png" % (self.plot_prefix, t_input.sentence_id, layer, head),
+                        t_output.monotonicity_score)
+        else:
+            plot_attention_mono_loss(t_output.attention_matrix,
+                        t_input.tokens,
+                        t_output.tokens,
+                        "%s_s%s_layer%s.png" % (self.plot_prefix, t_input.sentence_id, layer),
+                        t_output.monotonicity_score)
 
     def reports_score(self) -> bool:
         return False

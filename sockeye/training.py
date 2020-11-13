@@ -76,7 +76,9 @@ class TrainingModel(model.SockeyeModel):
                  attention_monotonicity: Optional[str] = None,
                  attention_monotonicity_loss_lambda: Optional[float] = 0.0,
                  attention_monotonicity_loss_margin: Optional[float] = 1.0,
-                 monotonicity_on_heads: Optional[ Tuple[int, int]] = None) -> None:
+                 monotonicity_on_heads: Optional[ Tuple[int, int]] = None,
+                 monotonicity_on_layers: Optional[ Tuple[int, int]] = None,
+                 monotonicity_loss_double_normalize: Optional[bool] = False) -> None:
         super().__init__(config)
         self.context = context
         self.output_dir = output_dir
@@ -88,7 +90,9 @@ class TrainingModel(model.SockeyeModel):
         self._attention_monotonicity = attention_monotonicity
         self._attention_monotonicity_loss_lambda = attention_monotonicity_loss_lambda
         self._attention_monotonicity_loss_margin = attention_monotonicity_loss_margin
+        self._monotonicity_loss_double_normalize = monotonicity_loss_double_normalize
         self._monotonicity_on_heads = monotonicity_on_heads
+        self._monotonicity_on_layers = monotonicity_on_layers
         self._initialize(provide_data, provide_label, default_bucket_key)
         self._monitor = None  # type: Optional[mx.monitor.Monitor]
 
@@ -190,7 +194,7 @@ class TrainingModel(model.SockeyeModel):
                 logits = mx.sym.concat(logits, pointer_scores, dim=1)
 
             # 1) standard cross-entropy loss
-            net_outputs = [self.model_loss.get_loss(logits=logits, labels=labels, grad_scale=1-self._attention_monotonicity_loss_lambda)]
+            net_outputs = [self.model_loss.get_loss(logits=logits, labels=labels, grad_scale=1.0)] ## only scaling mono loss for now
             # 2) length task losses
             if self.length_task_loss is not None:
                 # predicted_length_ratios: (batch_size, 1)
@@ -217,10 +221,14 @@ class TrainingModel(model.SockeyeModel):
                                                                                     num_attention_heads=num_attention_heads,
                                                                                     target_words=target_words,
                                                                                     source_words=source_words,
+                                                                                    s_t_length_ratio=mx.sym.broadcast_div(source_length, target_length),
+                                                                                    target_length=target_length,
                                                                                     grad_scale=self._attention_monotonicity_loss_lambda,
                                                                                     margin=self._attention_monotonicity_loss_margin,
                                                                                     monotonicity_on_heads=self._monotonicity_on_heads,
-                                                                                    absolute_positions=False)]
+                                                                                    monotonicity_on_layers=self._monotonicity_on_layers,
+                                                                                    absolute_positions=False,
+                                                                                    monotonicity_loss_double_normalize=self._monotonicity_loss_double_normalize)]
                 elif self._attention_monotonicity == "absolute":
                     loss_attention = [self.attention_monotonicity_loss.get_loss(attention_scores_list=attention_scores_list,
                                                                                     positional_attention=None,
@@ -232,7 +240,9 @@ class TrainingModel(model.SockeyeModel):
                                                                                     grad_scale=self._attention_monotonicity_loss_lambda,
                                                                                     margin=self._attention_monotonicity_loss_margin,
                                                                                     monotonicity_on_heads=self._monotonicity_on_heads,
-                                                                                    absolute_positions=True)]
+                                                                                    monotonicity_on_layers=self._monotonicity_on_layers,
+                                                                                    absolute_positions=True,
+                                                                                    monotonicity_loss_double_normalize=self._monotonicity_loss_double_normalize)]
                 return mx.sym.Group(net_outputs + loss_attention), data_names, label_names
             else:
                 return mx.sym.Group(net_outputs), data_names, label_names
