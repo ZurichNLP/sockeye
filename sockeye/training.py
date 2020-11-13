@@ -194,7 +194,7 @@ class TrainingModel(model.SockeyeModel):
                 logits = mx.sym.concat(logits, pointer_scores, dim=1)
             
             # 1) standard cross-entropy loss
-            net_outputs = [self.model_loss.get_loss(logits=logits, labels=labels, grad_scale=1-self._attention_monotonicity_loss_lambda)]
+            net_outputs = [self.model_loss.get_loss(logits=logits, labels=labels, grad_scale=1.0)] ## only scaling mono loss for now
             # 2) length task losses
             if self.length_task_loss is not None:
                 # predicted_length_ratios: (batch_size, 1)

@@ -1181,7 +1181,7 @@ def add_learned_positions_args(params):
     params.add_argument('--attention-monotonicity-loss-lambda',
                               type=float,
                               default=0.0,
-                              help='Scale monotone attention loss on learned positional embeddings by lambda, CE loss will be scaled by (1-lambda) (for both learned positional reordering and absolute positions). Default: %(default)s.')
+                              help='Scale monotone attention loss on learned positional embeddings by lambda, CE loss will not be scaled. Default: %(default)s.')
     params.add_argument('--attention-monotonicity-loss-margin',
                               type=float,
                               default=1.0,

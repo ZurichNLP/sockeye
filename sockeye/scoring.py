@@ -325,9 +325,8 @@ class Scorer:
                 total_layers = self.model.config.config_decoder.num_layers
                 start_layer, end_layer = self.model.monotonicity_on_layers
                 layer_attention_list = []
-                for i in range(start_layer+2, end_layer+3): ## shift, output[0]=ce, output[1]=mono score
+                for i in range(start_layer+2, end_layer+3): ## shift, output[2]=mono score
                     layer_attention_list.append(output[i])
-                #exit(0)
             
 
             batch_time = time.time() - batch_tic
@@ -362,6 +361,7 @@ class Scorer:
                 output_handler.handle(TranslatorInput(sentence_no, source_tokens),
                                       TranslatorOutput(sentence_no, target_string, None, None, score, None, None, None, None, None, None, monotonicity_score), 
                                       batch_time)
+                
                 if attention_handler is not None:
                     target_tokens = list(data_io.ids2tokens(target_ids, self.target_vocab_inv, self.exclude_list))
                     target_tokens.insert(0, "BOS")
@@ -375,24 +375,24 @@ class Scorer:
                             end = num_attention_heads
                             if self.model.monotonicity_on_heads is not None:
                                 start, end = self.model.monotonicity_on_heads
-                                
-                            for head in range(start, end+1):
-                                attention = layer_attention[sentno*head] ## trg_len, src_len 
+                            layer_attention = layer_attention.reshape(shape=(-4, -1, num_attention_heads, -2))
+                            for head in range(start-1, end):
+                                attention = layer_attention[(sentno-1)][head] ## trg_len, src_len, sentno starts at 1, need index to start at 0
                                 attention = attention.slice_axis(axis=0, begin=0, end=(len(target_tokens)) )
                                 attention = attention.slice_axis(axis=1, begin=0, end=(len(source_tokens)) )
                                 attention_handler.handle(t_input=TranslatorInput(sentence_no, source_tokens),
                                               t_output=TranslatorOutput(sentence_no, target_string, target_tokens, attention.asnumpy(), score, None, None, None, None, None, None, monotonicity_score),
                                               layer=i,
-                                              head=head)
+                                              head=head+1)
                                  
                         else:
-                            attention = layer_attention[sentno] ## trg_len, src_len ## 
+                            attention = layer_attention[sentno] ## trg_len, src_len
                             attention = attention.slice_axis(axis=0, begin=0, end=(len(target_tokens)) )
                             attention = attention.slice_axis(axis=1, begin=0, end=(len(source_tokens)) )
                             
                             attention_handler.handle(t_input=TranslatorInput(sentence_no, source_tokens),
                                               t_output=TranslatorOutput(sentence_no, target_string, target_tokens, attention.asnumpy(), score, None, None, None, None, None, None, monotonicity_score),
-                                              layer=i+1)
+                                              layer=i)
 
         if sentence_no != 0:
             logger.info("Processed %d lines in %d batches. Total time: %.4f, sec/sent: %.4f, sent/sec: %.4f",
