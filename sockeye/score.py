@@ -150,8 +150,7 @@ def score(args: argparse.Namespace):
 
         scorer = scoring.Scorer(scoring_model, source_vocabs, target_vocab)
         if args.print_attention_scores:
-            if scoring_model.config.config_decoder.attention_heads > 1:
-                scorer.score(score_iter=score_iter,
+            scorer.score(score_iter=score_iter,
                             output_handler=get_output_handler(output_type=args.output_type,
                                                             output_fname=args.output),
                             attention_handler=get_output_handler(output_type=C.OUTPUT_HANDLER_ALIGN_PLOT_TRS,

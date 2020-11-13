@@ -325,8 +325,8 @@ class Scorer:
             if self.model.attention_monotonicity_scoring:
                 attention_monotonicity_scores = output[2]
                 num_attention_heads = 1
-                num_attention_heads = self.model.config.config_decoder.attention_heads
-                total_layers = self.model.config.config_decoder.num_layers
+                if hasattr(self.model.config.config_decoder, "attention_heads"):
+                    num_attention_heads = self.model.config.config_decoder.attention_heads
                 start_layer, end_layer = self.model.monotonicity_on_layers
                 layer_attention_list = []
                 for i in range(start_layer+2, end_layer+3): ## shift, output[2]=mono score
@@ -390,7 +390,7 @@ class Scorer:
                                               head=head+1)
                                  
                         else:
-                            attention = layer_attention[sentno] ## trg_len, src_len
+                            attention = layer_attention[sentno-1] ## trg_len, src_len
                             attention = attention.slice_axis(axis=0, begin=0, end=(len(target_tokens)) )
                             attention = attention.slice_axis(axis=1, begin=0, end=(len(source_tokens)) )
                             

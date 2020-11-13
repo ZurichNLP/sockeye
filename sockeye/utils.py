@@ -407,7 +407,9 @@ def plot_attention_mono_loss(attention_matrix: np.ndarray, source_tokens: List[s
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
     assert attention_matrix.shape[0] == len(target_tokens)
-
+    
+    
+    fig, ax = plt.subplots()
     plt.imshow(attention_matrix.transpose(), interpolation="nearest", cmap="Greys")
     plt.xlabel("target")
     plt.ylabel("source")
@@ -416,6 +418,10 @@ def plot_attention_mono_loss(attention_matrix: np.ndarray, source_tokens: List[s
     plt.gca().set_xticklabels(target_tokens, rotation='vertical')
     plt.gca().set_yticklabels(source_tokens)
     plt.tight_layout()
+    
+    for (i, j), z in np.ndenumerate(attention_matrix.transpose()):
+        ax.text(j, i, '{:0.3f}'.format(z), ha='center', va='center', fontsize=5, color="blue")
+    
     if score is not None:
         plt.figtext(0.5, 0.01, str(score), wrap=True, horizontalalignment='center')
     plt.savefig(filename)
