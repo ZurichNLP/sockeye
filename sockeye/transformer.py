@@ -32,6 +32,7 @@ class TransformerConfig(config.Config):
                  act_type: str,
                  num_layers: int,
                  dropout_attention: float,
+                 drophead_attention: float,
                  dropout_act: float,
                  dropout_prepost: float,
                  positional_embedding_type: str,
@@ -53,6 +54,7 @@ class TransformerConfig(config.Config):
         self.act_type = act_type
         self.num_layers = num_layers
         self.dropout_attention = dropout_attention
+        self.drophead_attention = drophead_attention
         self.dropout_act = dropout_act
         self.dropout_prepost = dropout_prepost
         self.positional_embedding_type = positional_embedding_type
@@ -89,6 +91,7 @@ class TransformerEncoderBlock(mx.gluon.HybridBlock):
                                                                 heads=config.attention_heads,
                                                                 depth_out=config.model_size,
                                                                 dropout=config.dropout_attention,
+                                                                drophead=config.drophead_attention,
                                                                 prefix="att_self_")
             self.post_self_attention = TransformerProcessBlock(sequence=config.postprocess_sequence,
                                                                dropout=config.dropout_prepost,
@@ -108,7 +111,7 @@ class TransformerEncoderBlock(mx.gluon.HybridBlock):
             self.lhuc = None
             if config.use_lhuc:
                 self.lhuc = layers.LHUC(config.model_size)
-            
+
             self.positional_embedding_layer = None
             if has_positional_embedding_layer:
                 self.positional_embedding_layer = layers.MultilingualPositionalEmbeddingsLayer(model_size=config.model_size, prefix=C.MULTILINGUAL_POSITIONAL_EMBEDDINGS_LAYER_PREFIX, non_en_id=config.non_en_id, sublayer_context=config.sublayer_context)
@@ -117,7 +120,7 @@ class TransformerEncoderBlock(mx.gluon.HybridBlock):
         # self-attention
         data_self_att = self.self_attention(self.pre_self_attention(data, None), None, bias, None)
         data = self.post_self_attention(data_self_att, data)
-        
+
         if self.positional_embedding_layer is not None:
             data, position_probs = self.positional_embedding_layer(data, pos_embed, source, source_lengths)
             # feed-forward
@@ -151,6 +154,7 @@ class TransformerDecoderBlock(mx.gluon.HybridBlock):
                                                                 heads=config.attention_heads,
                                                                 depth_out=config.model_size,
                                                                 dropout=config.dropout_attention,
+                                                                drophead=config.drophead_attention,
                                                                 prefix="att_self_")
             self.post_self_attention = TransformerProcessBlock(sequence=config.postprocess_sequence,
                                                                dropout=config.dropout_prepost,
@@ -163,6 +167,7 @@ class TransformerDecoderBlock(mx.gluon.HybridBlock):
                                                            heads=config.attention_heads,
                                                            depth_out=config.model_size,
                                                            dropout=config.dropout_attention,
+                                                           drophead=config.drophead_attention,
                                                            prefix="att_enc_",
                                                            return_probs=config.return_dec_enc_att_probs)
             self.post_enc_attention = TransformerProcessBlock(sequence=config.postprocess_sequence,
@@ -348,5 +353,3 @@ def get_autoregressive_bias(max_length: int, dtype: str = C.DTYPE_FP32) -> mx.sy
     bias = bias * -C.LARGE_VALUES[dtype]
     bias = mx.sym.reshape(bias, shape=(1, max_length, max_length))
     return mx.sym.BlockGrad(bias)
-
-

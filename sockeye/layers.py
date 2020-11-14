@@ -385,9 +385,17 @@ def broadcast_to_heads(F, x: mx.sym.Symbol, num_heads: int, ndim: int, fold_head
 
 class DotAttentionCell(mx.gluon.HybridBlock):
 
-    def __init__(self, dropout: float = 0.0, prefix: str = '') -> None:
+    def __init__(self,
+                 dropout: float = 0.0,
+                 drophead: float = 0.0,
+                 depth_per_head: int = 64,
+                 heads: int = 8,
+                 prefix: str = '') -> None:
         super().__init__(prefix=prefix)
         self.dropout = dropout
+        self.drophead = drophead
+        self.depth_per_head = depth_per_head
+        self.heads = heads
 
     def hybrid_forward(self, F, queries, keys, values, lengths=None, bias=None, return_probs: Optional[bool] = False):
         utils.check_condition(lengths is not None or bias is not None,
@@ -411,6 +419,7 @@ class DotAttentionCell(mx.gluon.HybridBlock):
 
         probs = F.softmax(logits, axis=-1)
         probs = F.Dropout(probs, p=self.dropout) if self.dropout > 0.0 else probs
+        probs = F.Dropout(probs, p=self.drophead, axes=(1,2)) if self.drophead > 0.0 else probs # dropout only applied to entire heads
 
         # (n, lq, lk) x (n, lk, dv) -> (n, lq, dv)
         return F.batch_dot(lhs=probs, rhs=values), probs
@@ -432,6 +441,7 @@ class MultiHeadAttentionBase(mx.gluon.HybridBlock):
                  heads: int = 8,
                  depth_out: int = 512,
                  dropout: float = 0.0,
+                 drophead: float = 0.0,
                  return_probs: Optional[bool]= False) -> None:
         super().__init__(prefix=prefix)
         utils.check_condition(depth_att % heads == 0,
@@ -443,7 +453,7 @@ class MultiHeadAttentionBase(mx.gluon.HybridBlock):
         self.return_probs =return_probs
 
         with self.name_scope():
-            self.dot_att = DotAttentionCell(dropout=dropout, prefix='dot_att')
+            self.dot_att = DotAttentionCell(dropout=dropout, drophead=drophead, depth_per_head=self.depth_per_head, heads=heads, prefix='dot_att')
             self.ff_out = mx.gluon.nn.Dense(units=depth_out, flatten=False, use_bias=False, prefix='h2o_')
 
     def _attend(self,
@@ -498,8 +508,9 @@ class MultiHeadSelfAttention(MultiHeadAttentionBase):
                  depth_att: int = 512,
                  heads: int = 8,
                  depth_out: int = 512,
-                 dropout: float = 0.0) -> None:
-        super().__init__(prefix, depth_att, heads, depth_out, dropout)
+                 dropout: float = 0.0,
+                 drophead: float = 0.0) -> None:
+        super().__init__(prefix, depth_att, heads, depth_out, dropout, drophead)
 
         with self.name_scope():
             self.ff_in = mx.gluon.nn.Dense(units=depth_att * 3, flatten=False, use_bias=False, prefix='i2h_')
@@ -534,7 +545,7 @@ class MultiHeadSelfAttention(MultiHeadAttentionBase):
             # append new keys & values to cache, update the cache
             keys = cache['k'] = keys if cache['k'] is None else F.concat(cache['k'], keys, dim=1)
             values = cache['v'] = values if cache['v'] is None else F.concat(cache['v'], values, dim=1)
-        
+
         contexts , probs = self._attend(F, queries, keys, values, lengths=input_lengths, bias=bias)
         return contexts
 
@@ -556,8 +567,9 @@ class MultiHeadAttention(MultiHeadAttentionBase):
                  heads: int = 8,
                  depth_out: int = 512,
                  dropout: float = 0.0,
+                 drophead: float = 0.0,
                  return_probs: Optional[bool] =False) -> None:
-        super().__init__(prefix, depth_att, heads, depth_out, dropout, return_probs)
+        super().__init__(prefix, depth_att, heads, depth_out, dropout, drophead, return_probs)
 
         with self.name_scope():
             self.ff_q = mx.gluon.nn.Dense(units=depth_att, flatten=False, use_bias=False, prefix='q2h_')
@@ -664,17 +676,17 @@ class ProjectedDotAttention(mx.gluon.HybridBlock):
         return contexts
 
 class MultilingualPositionalEmbeddingsLayer(mx.gluon.HybridBlock):
-    
-    
-    def __init__(self, 
-                model_size: int, 
+
+
+    def __init__(self,
+                model_size: int,
                 prefix: str = C.MULTILINGUAL_POSITIONAL_EMBEDDINGS_LAYER_PREFIX,
                 non_en_id: Optional[int] = None,
                 sublayer_context: Optional[str] = C.SUBLAYER_CONTEXT_ADD) -> None:
         super().__init__(prefix=prefix)
         self.non_en_id = non_en_id
         self.sublayer_context = sublayer_context
-        
+
         with self.name_scope():
             # TODO: dropout?
             self.hidden2pos_attention = MultiHeadAttention(depth_att=model_size,
@@ -690,18 +702,18 @@ class MultilingualPositionalEmbeddingsLayer(mx.gluon.HybridBlock):
                 self.linear_w = mx.sym.Variable("%slinear_proj_weight" % self.prefix,
                                                 shape=(self.model_size, self.model_size))
                 self.linear_bias = mx.sym.Variable("%slinear_bias" % self.prefix)
-                
+
             #if self.sublayer_context == C.SUBLAYER_CONTEXT_DOT:
             #   self.linear_w = mx.sym.Variable("%sdot_linear_proj_weight" % self.prefix,
                                                 #shape=(self.model_size, self.model_size))
                 #self.linear_bias = mx.sym.Variable("%slinear_bias" % self.prefix)
-            
+
     def hybrid_forward(self, F,
                 data: mx.sym.Symbol,
                 pos_embed: mx.sym.Symbol,
                 source: mx.sym.Symbol,
                 source_lengths: mx.sym.Symbol):
-        
+
                 """
                 Weigh learned positional embeddings, add to non-English sentences, add original positional embeddings to English sentences.
                 :param data: Encoder hidden states of last sub layer, before FF (output of self attention after residual + layer norm). Symbol of shape (batch, src_len, encoder_num_hidden).
@@ -710,26 +722,26 @@ class MultilingualPositionalEmbeddingsLayer(mx.gluon.HybridBlock):
                 :param source_lengths: Length of source sentences in batch without padding. Symbol of shape(batch, ).
                 :return: Symbol of shape (batch, queries_max_length, num_hidden).
                 """
-        
+
                 # position_probs: (batch_size * attention_heads=1, source_length(=queries), source_length(=keys))
                 # context shape: (batch_size * attention_heads=1, source_length, model_size)
                 ones = mx.sym.ones_like(data)
                 pos_embed = mx.sym.broadcast_mul(ones, pos_embed)
-                
+
                 context, position_probs = self.hidden2pos_attention(data, pos_embed, source_lengths, None) # position_probs (batch, src_len, pos_len=src_len), context (batch, src_len, encoder_num_hidden)
                 # get weighted embeddings
                 ## variations:
-                
+
                 # 1 context + pos_embed
                 if self.sublayer_context == C.SUBLAYER_CONTEXT_ADD:
                     non_en_weighted_embeddings = mx.sym.broadcast_add(pos_embed, context) # (batch, src_len, encoder_num_hidden)
                     en_pos_embed = pos_embed
-                
+
                 # 2 context * pos_embed
                 elif self.sublayer_context == C.SUBLAYER_CONTEXT_MUL:
                     non_en_weighted_embeddings = mx.sym.broadcast_mul(pos_embed, context) # (batch, src_len, encoder_num_hidden)
                     en_pos_embed = pos_embed
-                
+
                 # 3 linear_proj(context) + pos_embed
                 # proj_context: flatten=true (batch, hidden), flatten=false (seq_len, proj size)
                 elif self.sublayer_context == C.SUBLAYER_CONTEXT_PROJ_ADD:
@@ -744,7 +756,7 @@ class MultilingualPositionalEmbeddingsLayer(mx.gluon.HybridBlock):
                                                 name=self.prefix + '_linear_context_transform')
                     proj_context = mx.sym.reshape_like(lhs=proj_context, rhs=data)
                     non_en_weighted_embeddings = proj_context + pos_embed
-                
+
                 # 4 linear(proj) * pos_embed
                 elif self.sublayer_context == C.SUBLAYER_CONTEXT_PROJ_MUL:
                     logger.warn("Projection not implemented for English positional embeddings")
@@ -758,40 +770,29 @@ class MultilingualPositionalEmbeddingsLayer(mx.gluon.HybridBlock):
                                                 name=self.prefix + '_linear_context_transform')
                     proj_context = mx.sym.reshape_like(lhs=proj_context, rhs=data)
                     non_en_weighted_embeddings = proj_context * pos_embed
-                
+
                 # 5 with activation
                 elif self.sublayer_context == C.SUBLAYER_CONTEXT_ACT_ADD:
                     active_positions = mx.sym.Activation(data=context, act_type="sigmoid")
-                    
+
                     non_en_weighted_embeddings = mx.sym.broadcast_add(pos_embed, active_positions) # (batch, src_len, encoder_num_hidden)
                     # active original positional embeddings for English data
                     en_active_positions = mx.sym.Activation(data=pos_embed, act_type="sigmoid")
                     en_pos_embed =  mx.sym.broadcast_add(pos_embed, en_active_positions)
-                
+
                 # add weighted positional embeddings to non-English data
                 non_en_data = mx.sym.broadcast_add(data, non_en_weighted_embeddings)
                 en_data  = mx.sym.broadcast_add(data, en_pos_embed)
-            
+
                 ## get mask for non-English sentences (batch, 1, 1) where non-English sentences =1, English = 0
                 non_en_mask = (source == self.non_en_id) # shape (batch, src_len), non_en_id = id of <non_en>
-                non_en_mask = mx.sym.sum(non_en_mask, axis=1) # (batch, 1) 
+                non_en_mask = mx.sym.sum(non_en_mask, axis=1) # (batch, 1)
                 non_en_mask = mx.sym.expand_dims(non_en_mask, axis=1) # (batch, 1,1)
-                non_en_mask = mx.sym.expand_dims(non_en_mask, axis=1) 
+                non_en_mask = mx.sym.expand_dims(non_en_mask, axis=1)
                 non_en_data = mx.sym.broadcast_mul(non_en_mask, non_en_data) # data + weighted positions for non-English sentences, 0 for English sentences, # (batch, src_len, encoder_num_hidden)
 
                 # English mask: 1 for en sentences, 0 for others -> inverse of mask
                 en_mask = (non_en_mask == 0)
                 en_data = mx.sym.broadcast_mul(en_mask, en_data) # data + positions for English sentences, 0 for non-English sentences, # (batch, src_len, encoder_num_hidden)
-                data = mx.sym.broadcast_add(en_data, non_en_data) 
+                data = mx.sym.broadcast_add(en_data, non_en_data)
                 return data, position_probs
-        
-        
-        
-        
-        
-        
-        
-        
-        
-        
-        
