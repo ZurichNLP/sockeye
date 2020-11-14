@@ -982,7 +982,7 @@ def add_training_args(params):
                               help='Dropout probability for multi-head attention. Default: %(default)s.')
     train_params.add_argument('--transformer-drophead-attention',
                               type=float,
-                              default=0.1,
+                              default=0.0,
                               help='Dropout probability for dropping out entire heads in multi-head attention. Default: %(default)s.')
     train_params.add_argument('--transformer-dropout-act',
                               type=float,
