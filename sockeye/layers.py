@@ -388,14 +388,10 @@ class DotAttentionCell(mx.gluon.HybridBlock):
     def __init__(self,
                  dropout: float = 0.0,
                  drophead: float = 0.0,
-                 depth_per_head: int = 64,
-                 heads: int = 8,
                  prefix: str = '') -> None:
         super().__init__(prefix=prefix)
         self.dropout = dropout
         self.drophead = drophead
-        self.depth_per_head = depth_per_head
-        self.heads = heads
 
     def hybrid_forward(self, F, queries, keys, values, lengths=None, bias=None, return_probs: Optional[bool] = False):
         utils.check_condition(lengths is not None or bias is not None,
@@ -453,7 +449,7 @@ class MultiHeadAttentionBase(mx.gluon.HybridBlock):
         self.return_probs =return_probs
 
         with self.name_scope():
-            self.dot_att = DotAttentionCell(dropout=dropout, drophead=drophead, depth_per_head=self.depth_per_head, heads=heads, prefix='dot_att')
+            self.dot_att = DotAttentionCell(dropout=dropout, drophead=drophead, prefix='dot_att')
             self.ff_out = mx.gluon.nn.Dense(units=depth_out, flatten=False, use_bias=False, prefix='h2o_')
 
     def _attend(self,
