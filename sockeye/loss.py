@@ -439,7 +439,8 @@ class MonotoneAttention(Loss):
             target_length = target_length + epsilon
             head_loss = mx.sym.broadcast_div(head_loss, target_length, name="_mono_loss_broad_div")
             if monotonicity_loss_double_normalize:
-                head_loss = mx.sym.broadcast_div(head_loss, target_length, name="_mono_loss_broad_div2")
+                source_length = source_length +epsilon
+                head_loss = mx.sym.broadcast_div(head_loss, source_length, name="_mono_loss_broad_div2")
             layer_loss = mx.sym.broadcast_add(layer_loss, head_loss, name="_mono_loss_broad_add")
 
         heads = end-start
