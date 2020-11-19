@@ -327,7 +327,9 @@ class Scorer:
                 num_attention_heads = 1
                 if hasattr(self.model.config.config_decoder, "attention_heads"):
                     num_attention_heads = self.model.config.config_decoder.attention_heads
-                start_layer, end_layer = self.model.monotonicity_on_layers
+                start_layer, end_layer = (1,1)
+                if self.model.monotonicity_on_layers is not None:
+                    start_layer, end_layer = self.model.monotonicity_on_layers
                 layer_attention_list = []
                 for i in range(start_layer+2, end_layer+3): ## shift, output[2]=mono score
                     layer_attention_list.append(output[i])
