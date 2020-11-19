@@ -516,40 +516,68 @@ class AddSinCosPositionalEmbeddings(PositionalEncoder):
     def encode(self,
                data: mx.sym.Symbol,
                data_length: Optional[mx.sym.Symbol],
-               seq_len: int) -> Tuple[mx.sym.Symbol, mx.sym.Symbol, int]:
+               seq_len: int,
+               source: Optional[mx.sym.Symbol] = None,
+               separator_id: Optional[int] = None) -> Tuple[mx.sym.Symbol, mx.sym.Symbol, int]:
         """
         :param data: (batch_size, source_seq_len, num_embed)
         :param data_length: (batch_size,)
         :param seq_len: sequence length.
         :return: (batch_size, source_seq_len, num_embed)
         """
-        positions = mx.sym.arange(0, seq_len)
-        embedding = self.encode_positions(positions, data)
+        positions = mx.sym.arange(0, seq_len) # (src_len, )
+        source_token_positions = source
+        if separator_id is not None:
+            # get source tokens without factor dimension
+            # TODO does not work with multiple factors
+            source_tokens = source.squeeze() # (batch, src_len)
+
+            # lookup positions of <sep>
+            source_token_positions = mx.sym.broadcast_mul(mx.sym.ones_like(source_tokens), positions) # (batch, src_len)
+            max_token_positions = mx.sym.broadcast_mul(mx.sym.ones_like(source_token_positions), mx.sym.max(source_token_positions)) # (batch, src_len)
+            match_indices = mx.sym.where(condition=(source_tokens == separator_id),
+                                         x=source_token_positions,
+                                         y=max_token_positions) # (batch, src_len)
+            separator_ids = mx.sym.min(match_indices, axis=1) # (batch,)
+
+            # update positions to start at 0 for <sep> token
+            positions = mx.sym.broadcast_sub(source_token_positions, mx.sym.expand_dims(separator_ids, axis=1)) # (batch, src_len)
+        embedding = self.encode_positions(positions, data, separator_id)
         return embedding, data_length, seq_len
 
     def encode_positions(self,
                          positions: mx.sym.Symbol,
-                         data: mx.sym.Symbol) -> mx.sym.Symbol:
+                         data: mx.sym.Symbol,
+                         separator_id: int = None) -> mx.sym.Symbol:
         """
         :param positions: (batch_size,)
         :param data: (batch_size, num_embed)
         :return: (batch_size, num_embed)
         """
-        # (batch_size, 1)
-        positions = mx.sym.expand_dims(positions, axis=1)
+        # TODO does not work with batch-size 1
+        if separator_id is not None:
+            # (batch_size, src_len, 1)
+            positions = mx.sym.expand_dims(positions, axis=2)
+        else:
+            # (src_len, 1)
+            positions = mx.sym.expand_dims(positions, axis=1)
         # (num_embed,)
         channels = mx.sym.arange(0, self.num_embed // 2)
         # (1, num_embed,)
         scaling = mx.sym.expand_dims(1. / mx.sym.pow(10000, (2 * channels) / self.num_embed), axis=0)
 
-        # (batch_size, num_embed/2)
+        # (batch_size, src_len ?, num_embed/2)
         scaled_positions = mx.sym.dot(positions, scaling)
 
         sin = mx.sym.sin(scaled_positions)
         cos = mx.sym.cos(scaled_positions)
 
-        # (batch_size, num_embed)
-        pos_embedding = mx.sym.concat(sin, cos, dim=1)
+        if separator_id is not None:
+            # (batch_size, src_len, num_embed)
+            pos_embedding = mx.sym.concat(sin, cos, dim=2)
+        else:
+            # (src_len, num_embed)
+            pos_embedding = mx.sym.concat(sin, cos, dim=1)
 
         if self.scale_up_input:
             data = data * (self.num_embed ** 0.5)
@@ -722,7 +750,8 @@ class EncoderSequence(Encoder):
                data_length: mx.sym.Symbol,
                seq_len: int,
                get_pos_embed: Optional[bool] = False,
-               source: Optional[mx.sym.Symbol] = None) -> Tuple[mx.sym.Symbol, mx.sym.Symbol, int]:
+               source: Optional[mx.sym.Symbol] = None,
+               separator_id: Optional[int] = None) -> Tuple[mx.sym.Symbol, mx.sym.Symbol, int]:
         """
         Encodes data given sequence lengths of individual examples and maximum sequence length.
 
@@ -739,7 +768,7 @@ class EncoderSequence(Encoder):
             return data, data_length, seq_len, pos_embed, position_probs
         else:
             for encoder in self.encoders:
-                data, data_length, seq_len = encoder.encode(data, data_length, seq_len)
+                data, data_length, seq_len = encoder.encode(data, data_length, seq_len, source=source, separator_id=separator_id)
             return data, data_length, seq_len
 
     def get_num_hidden(self) -> int:
@@ -851,7 +880,7 @@ class RecurrentEncoder(Encoder):
         :param seq_len: Maximum sequence length.
         :return: Encoded versions of input data (data, data_length, seq_len).
         """
-        
+
         # The following piece of code illustrates how to unroll the RNN cell(s) over time independent of seq_len,
         # using the new control-flow operator foreach. It works, but shape inference fails when using
         # the VariationalDropout cell. ATM it is unclear how to fix it.
@@ -1030,7 +1059,7 @@ class TransformerEncoder(Encoder, mx.gluon.HybridBlock):
     Non-recurrent encoder based on the transformer architecture in:
 
     Attention Is All You Need, Figure 1 (left)
-    Vaswani et al. (https://arxiv.org/pdf/1706.03762.pdf).
+    Vaswani et al. (https://arxiv.org/pdf/1706.None03762.pdf).
 
     :param config: Configuration for transformer encoder.
     :param prefix: Name prefix for operations in this encoder.
@@ -1094,7 +1123,8 @@ class TransformerEncoder(Encoder, mx.gluon.HybridBlock):
                data_length: Optional[mx.sym.Symbol],
                seq_len: int,
                pos_embed: Optional[mx.sym.Symbol] = None,
-               source: Optional[mx.sym.Symbol] = None):
+               source: Optional[mx.sym.Symbol] = None,
+               separator_id: Optional[int] = None):
         """
         Encodes data given sequence lengths of individual examples and maximum sequence length.
 
@@ -1105,7 +1135,7 @@ class TransformerEncoder(Encoder, mx.gluon.HybridBlock):
         """
         if pos_embed is not None:
             return self._encode(mx.sym, data, data_length, pos_embed, source), data_length, seq_len, pos_embed
-        else:    
+        else:
             return self._encode(mx.sym, data, data_length), data_length, seq_len
 
     def get_num_hidden(self) -> int:
@@ -1333,5 +1363,3 @@ EncoderConfig = Union[RecurrentEncoderConfig, transformer.TransformerConfig, Con
                       EmptyEncoderConfig]
 if ImageEncoderConfig is not None:
     EncoderConfig = Union[EncoderConfig, ImageEncoderConfig]  # type: ignore
-
-    

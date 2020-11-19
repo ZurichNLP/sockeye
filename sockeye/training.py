@@ -171,7 +171,9 @@ class TrainingModel(model.SockeyeModel):
                 source_encoded_seq_len) = self.encoder.encode(source_embed,
                                                             source_embed_length,
                                                             source_embed_seq_len,
-                                                            get_pos_embed=False)
+                                                            get_pos_embed=False,
+                                                            source=source_words,
+                                                            separator_id=self.config.separator_id)
 
             # decoder
             # target_decoded: (batch-size, target_len, decoder_depth)

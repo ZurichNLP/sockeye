@@ -752,7 +752,8 @@ def create_model_config(args: argparse.Namespace,
                                      lhuc=args.lhuc is not None,
                                      num_pointers=num_pointers,
                                      attention_monotonicity=args.attention_monotonicity,
-                                     attention_monotonicity_config_loss=attention_monotonicity_config_loss)
+                                     attention_monotonicity_config_loss=attention_monotonicity_config_loss,
+                                     separator_id=separator_id)
     return model_config
 
 
